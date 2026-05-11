@@ -387,7 +387,23 @@ def test_lpm_confirmed_false_cp_in_check2():
           B(40h) → C(40h) → D  ← B+C is the longest path
       - All activities get total_float_hr_cnt=0 so TFM flags all.
       - LPM will flag B, C, D on the longest path (80h total) but NOT A (0h branch).
+
+    Skip condition: the LPM cross-check requires the sibling `cpp-cpm-engine`
+    package (`cpm` module) on sys.path. The README documents it as optional —
+    the validator gracefully degrades when the engine is unavailable. CI here
+    runs the validator stand-alone, so if `cpm` isn't importable we skip
+    rather than fail (the validator's no-engine fallback is exercised by
+    other tests, and the LPM-confirmation contract is exercised inside the
+    internal _deploy tree where `cpm` IS bundled).
     """
+    try:
+        import cpm  # noqa: F401
+    except ImportError:
+        import pytest as _pytest
+        _pytest.skip(
+            "cpp-cpm-engine (`cpm` module) not on sys.path — LPM cross-check "
+            "is documented as optional; stand-alone OSS CI cannot exercise it"
+        )
     tasks = [
         # task_id, task_code, task_name, proj_id, wbs_id, clndr_id,
         # status_code, task_type, target_drtn_hr_cnt, remain_drtn_hr_cnt,
