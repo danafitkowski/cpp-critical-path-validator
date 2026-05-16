@@ -38,7 +38,7 @@ Public API:
     dcma_14_assess(data, profile='commercial', baseline_data=None) -> dict
 
 Standards:
-    DCMA 14-Point Assessment (FAR Part 49, DFARS 234.2)
+    DCMA 14-Point Assessment (DCMA Defense Contract Management Agency 14-Point Schedule Assessment Procedure; DCMA-EA PAM 200.1)
     AACE 49R-06 "Identifying the Critical Path"
     NDIA PASEG (Planning and Scheduling Excellence Guide) §10
 """
