@@ -388,21 +388,30 @@ def test_lpm_confirmed_false_cp_in_check2():
       - All activities get total_float_hr_cnt=0 so TFM flags all.
       - LPM will flag B, C, D on the longest path (80h total) but NOT A (0h branch).
 
-    Skip condition: the LPM cross-check requires the sibling `cpp-cpm-engine`
-    package (`cpm` module) on sys.path. The README documents it as optional —
-    the validator gracefully degrades when the engine is unavailable. CI here
-    runs the validator stand-alone, so if `cpm` isn't importable we skip
-    rather than fail (the validator's no-engine fallback is exercised by
-    other tests, and the LPM-confirmation contract is exercised inside the
-    internal _deploy tree where `cpm` IS bundled).
+    Skip condition: the LPM cross-check requires `compute_lpm` from the
+    sibling `cpp-cpm-engine` package. The README documents it as optional —
+    the validator gracefully degrades when the engine is unavailable.
+
+    On stand-alone OSS CI, the engine repo IS cloned and `cpm` imports, but
+    the OSS `python_reference/cpm.py` is an explicitly-stripped subset (per
+    its header) that omits `compute_lpm` to keep the crossval surface
+    minimal. The full `compute_lpm` lives in the CPP internal `_cpp_common`
+    tree. Until `cpp-cpm-engine`'s OSS python_reference is expanded to
+    include `compute_lpm`, the test skips when the symbol is unavailable —
+    same end behavior as the prior "skip on ImportError of cpm" guard, just
+    narrowed to the actual missing symbol.
     """
     try:
-        import cpm  # noqa: F401
+        from cpm import compute_lpm  # noqa: F401
     except ImportError:
         import pytest as _pytest
         _pytest.skip(
-            "cpp-cpm-engine (`cpm` module) not on sys.path — LPM cross-check "
-            "is documented as optional; stand-alone OSS CI cannot exercise it"
+            "cpp-cpm-engine's OSS python_reference does not expose "
+            "compute_lpm — LPM cross-check is documented as optional. "
+            "The validator's CI clones the engine and proves the wiring "
+            "compiles; the full LPM-confirmation contract is exercised "
+            "inside the CPP internal _deploy tree where compute_lpm "
+            "is bundled."
         )
     tasks = [
         # task_id, task_code, task_name, proj_id, wbs_id, clndr_id,
