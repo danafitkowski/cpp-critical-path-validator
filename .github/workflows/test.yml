@@ -25,12 +25,36 @@ jobs:
       - name: Install pytest
         run: python -m pip install --upgrade pip pytest
 
+      - name: Clone cpp-cpm-engine (for LPM cross-check)
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/danafitkowski/cpp-cpm-engine "$RUNNER_TEMP/cpp-cpm-engine"
+          echo "CPP_CPM_ENGINE_PATH=$RUNNER_TEMP/cpp-cpm-engine/python_reference" >> "$GITHUB_ENV"
+
       - name: Run unit tests (pytest)
+        shell: bash
+        env:
+          PYTHONPATH: ${{ env.CPP_CPM_ENGINE_PATH }}
         run: pytest tests/ -v
 
       - name: Run unit tests (direct, no pytest)
         shell: bash
+        env:
+          PYTHONPATH: ${{ env.CPP_CPM_ENGINE_PATH }}
         run: |
           python tests/test_cp_validator.py
           python tests/test_dcma14.py
           python tests/test_cp_forensic.py
+
+      - name: Check xer_parser.py drift vs cpp-xer-parser upstream
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        shell: bash
+        run: |
+          UPSTREAM=$(curl -fsSL https://raw.githubusercontent.com/danafitkowski/cpp-xer-parser/main/scripts/xer_parser.py | sha256sum | awk '{print $1}')
+          LOCAL=$(sha256sum scripts/xer_parser.py | awk '{print $1}')
+          echo "upstream: $UPSTREAM"
+          echo "local:    $LOCAL"
+          if [ "$UPSTREAM" != "$LOCAL" ]; then
+            echo "Drift detected: validator's xer_parser.py differs from cpp-xer-parser main. Re-vendor."
+            exit 1
+          fi

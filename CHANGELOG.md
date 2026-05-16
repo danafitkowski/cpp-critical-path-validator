@@ -40,6 +40,12 @@ Initial public release. Companion to [`cpp-cpm-engine`](https://github.com/danaf
 - `scripts/xer_parser.py` is bundled (mirrored from `cpp-xer-parser`) so the validator stands alone without separately installing the parser.
 - `scripts/validation.py` and `scripts/config_profiles.py` are minimal standalone subsets of the full CPP internal modules — sufficient for the validator to run end-to-end. Inside the CPP forensic suite, the full versions take precedence (sys.path resolution in tests).
 
+### Engine compatibility
+
+Tested against `cpp-cpm-engine` v2.9.x (current as of 2026-05-16: v2.9.11+). Check 2's LPM cross-check requires `cpp-cpm-engine` on `PYTHONPATH`; the validator gracefully degrades when the engine is absent (the LPM-confirmed-false-CP detection becomes a no-op and the test for it is skipped). All other checks run stand-alone with zero third-party dependencies. Forward compatibility with future 2.x engine lines is intended; the optional LPM-confirmation API surface is the canonical interface contract.
+
+The bundled `scripts/xer_parser.py` mirrors `cpp-xer-parser` v0.1.x. A CI drift check fails the build if the mirrored copy diverges from the upstream canonical copy; re-vendor when intentional changes are needed.
+
 ### Companion repos
 
 - **[cpp-cpm-engine](https://github.com/danafitkowski/cpp-cpm-engine)** — The forensically-defensible CPM engine. Used by Check 2's LPM-confirmed-false-CP detection when available.
