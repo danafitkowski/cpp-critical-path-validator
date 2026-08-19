@@ -38,7 +38,7 @@ class Finding:
     severity   : one of BLOCK / WARN / INFO / PASS
     check_id   : stable identifier for the check (e.g. 'DCMA-01-Logic')
     message    : human-readable description
-    reference  : citation string (e.g. 'DCMA 14-Point #1', 'AACE 49R-06 §4')
+    reference  : citation string (e.g. 'DCMA 14-Point #1', 'AACE 49R-06')
     evidence   : structured supporting data (key/value, e.g. {'value': ..., 'threshold': ...})
     """
     severity: str

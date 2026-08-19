@@ -843,7 +843,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None):
         report.add(Finding(
             severity=INFO, check_id='DCMA-Ext-MultipleCP',
             message=f'{len(crit_paths)} distinct critical paths identified.',
-            reference='AACE 49R-06 §4',
+            reference='AACE 49R-06',
             evidence={'path_count': len(crit_paths), 'paths': crit_paths},
         ))
 
@@ -853,7 +853,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None):
         report.add(Finding(
             severity=WARN, check_id='DCMA-Ext-CPContinuity',
             message=f'Critical path has {len(continuity["gaps"])} continuity gap(s).',
-            reference='AACE 49R-06 §4.3',
+            reference='AACE 49R-06',
             # Full list — never truncate. CPP forensic-correctness rule: every
             evidence={'gaps': list(continuity['gaps'])},
         ))
@@ -861,7 +861,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None):
         report.add(Finding(
             severity=PASS, check_id='DCMA-Ext-CPContinuity',
             message='Critical path is continuous (no gaps detected).',
-            reference='AACE 49R-06 §4.3',
+            reference='AACE 49R-06',
         ))
 
     return {

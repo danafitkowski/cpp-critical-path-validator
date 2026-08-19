@@ -37,7 +37,7 @@ from collections import defaultdict, OrderedDict
 #   * Schema drift detection (schema_diff)
 #   * Calendar exception classification (special_workdays vs holidays)
 #   * Unified validation report (validate_schedule)
-#   * AACE 31R-03 compliance scoring (aace_31r_compliance)
+#   * Schedule structure scoring: aace_31r_compliance (legacy name; findings cite 29R-03 / 38R-06 / DCMA)
 _SKILL_VERSION = '2.0.0'
 
 # ─────────────────────────────────────────────
@@ -1697,14 +1697,21 @@ def validate_schedule(data, profile='commercial', subject=None):
 
     Checks performed:
       - File field-count validation (WARN on version-specific mismatch)
-      - AACE 31R-03 §3.1: at least one PROJECT record (BLOCK if zero)
-      - AACE 31R-03 §3.3: at least one CALENDAR record (BLOCK if zero)
-      - AACE 31R-03 §3.4: WBS depth within profile range (BLOCK if below min, WARN if above max)
-      - AACE 31R-03 §3.5: activity count within profile range (WARN outside)
-      - AACE 31R-03 §3.6: TASKPRED relationships present when tasks exist (BLOCK otherwise)
-      - AACE 53R-06 §4.2: holiday list empty on calendar named "...with holidays..." (WARN)
+      - AACE 29R-03 §2.1: at least one PROJECT record (BLOCK if zero)
+      - AACE 29R-03 §2.1.B.10: at least one CALENDAR record (BLOCK if zero)
+      - CPP profile / AACE 38R-06 §3.5: WBS depth within profile range (BLOCK if below min, WARN if above max)
+      - CPP profile / AACE 38R-06 §3.5: activity count within profile range (WARN outside)
+      - AACE 29R-03 §2.1.B.5 / DCMA 14-Point #1: TASKPRED ties on real work tasks (BLOCK otherwise)
+      - AACE 29R-03 §2.1.B.10: holiday list empty on calendar named "...with holidays..." (WARN)
       - INFO: multi-project XER
       - INFO: unusual encoding used for decoding
+
+    Citation note (2026-08-19): earlier revisions pinned these checks to
+    AACE 31R-03 (a cost-estimate RP, wrong document for schedule
+    propositions) and to 53R-06 pinpoints (the RP has no numbered sections).
+    References now point to AACE 29R-03 §2.1 (baseline schedule validation),
+    AACE 38R-06 §3.5 Planning Basis (Rev. June 18, 2009, Ed. Rev.
+    August 6, 2025), DCMA 14-Point, and the P6 XER schema itself.
 
     Args:
         data: parsed XER dict
@@ -1736,7 +1743,7 @@ def validate_schedule(data, profile='commercial', subject=None):
                         check_id='XER-FIELD-COUNT',
                         message=f'{table_name} has {field_count} fields; expected {expected} for P6 {version}',
                         evidence={'table': table_name, 'expected': expected, 'found': field_count, 'p6_version': version},
-                        reference='AACE 53R-06 §4.1 / P6 schema',
+                        reference='P6 XER schema (field counts by version)',
                     ))
     else:
         report.add(Finding(
@@ -1744,7 +1751,7 @@ def validate_schedule(data, profile='commercial', subject=None):
             check_id='XER-FIELD-COUNT-SKIPPED',
             message=f'P6 version {version!r} not in schema map — field-count check skipped',
             evidence={'p6_version': version},
-            reference='AACE 53R-06 §4.1',
+            reference='P6 XER schema (field counts by version)',
         ))
 
     # ── PROJECT record count ────────────────────────────────
@@ -1752,10 +1759,10 @@ def validate_schedule(data, profile='commercial', subject=None):
     if len(projects) == 0:
         report.add(Finding(
             severity=BLOCK,
-            check_id='AACE-31R-03-PROJECT-MISSING',
+            check_id='XER-PROJECT-MISSING',
             message='No PROJECT records found in the XER — file is not a valid schedule',
             evidence={'project_count': 0},
-            reference='AACE 31R-03 §3.1',
+            reference='AACE 29R-03 §2.1 (baseline schedule validation)',
         ))
     elif len(projects) > 1:
         report.add(Finding(
@@ -1764,7 +1771,7 @@ def validate_schedule(data, profile='commercial', subject=None):
             message=f'Multi-project XER — {len(projects)} PROJECT records found',
             evidence={'project_count': len(projects),
                       'project_ids': [p.get('proj_id', '') for p in projects]},
-            reference='AACE 31R-03 §3.1',
+            reference='P6 XER structure (multi-project export)',
         ))
 
     # ── CALENDAR record count ────────────────────────────────
@@ -1772,10 +1779,10 @@ def validate_schedule(data, profile='commercial', subject=None):
     if len(calendars) == 0:
         report.add(Finding(
             severity=BLOCK,
-            check_id='AACE-31R-03-CALENDAR-MISSING',
+            check_id='XER-CALENDAR-MISSING',
             message='No CALENDAR records found in the XER — activity durations cannot be computed',
             evidence={'calendar_count': 0},
-            reference='AACE 31R-03 §3.3',
+            reference='AACE 29R-03 §2.1.B.10 (calendar validation)',
         ))
 
     # ── WBS depth ────────────────────────────────
@@ -1792,18 +1799,18 @@ def validate_schedule(data, profile='commercial', subject=None):
         if max_wbs_depth < wbs_min:
             report.add(Finding(
                 severity=BLOCK,
-                check_id='AACE-31R-03-WBS-DEPTH-LOW',
+                check_id='XER-WBS-DEPTH-LOW',
                 message=f'WBS is too shallow — max depth {max_wbs_depth} < {wbs_min} ({profile} profile minimum)',
                 evidence={'max_wbs_depth': max_wbs_depth, 'min_required': wbs_min, 'profile': profile},
-                reference='AACE 31R-03 §3.4',
+                reference='CPP profile heuristic / AACE 38R-06 §3.5 (Planning Basis)',
             ))
         elif max_wbs_depth > wbs_max:
             report.add(Finding(
                 severity=WARN,
-                check_id='AACE-31R-03-WBS-DEPTH-HIGH',
+                check_id='XER-WBS-DEPTH-HIGH',
                 message=f'WBS is unusually deep — max depth {max_wbs_depth} > {wbs_max} ({profile} profile maximum)',
                 evidence={'max_wbs_depth': max_wbs_depth, 'max_allowed': wbs_max, 'profile': profile},
-                reference='AACE 31R-03 §3.4',
+                reference='CPP profile heuristic / AACE 38R-06 §3.5 (Planning Basis)',
             ))
 
     # ── Activity count ────────────────────────────────
@@ -1815,22 +1822,22 @@ def validate_schedule(data, profile='commercial', subject=None):
     if act_count < act_min:
         report.add(Finding(
             severity=WARN,
-            check_id='AACE-31R-03-ACTIVITY-COUNT-LOW',
+            check_id='XER-ACTIVITY-COUNT-LOW',
             message=f'Activity count {act_count} is below {profile} profile minimum of {act_min}',
             evidence={'activity_count': act_count, 'min': act_min, 'profile': profile},
-            reference='AACE 31R-03 §3.5',
+            reference='CPP profile heuristic / AACE 38R-06 §3.5 (Planning Basis)',
         ))
     elif act_count > act_max:
         report.add(Finding(
             severity=WARN,
-            check_id='AACE-31R-03-ACTIVITY-COUNT-HIGH',
+            check_id='XER-ACTIVITY-COUNT-HIGH',
             message=f'Activity count {act_count} exceeds {profile} profile maximum of {act_max}',
             evidence={'activity_count': act_count, 'max': act_max, 'profile': profile},
-            reference='AACE 31R-03 §3.5',
+            reference='CPP profile heuristic / AACE 38R-06 §3.5 (Planning Basis)',
         ))
 
     # ── TASKPRED presence when tasks exist ────────────────────────────────
-    # AACE 31R-03 §3.6 / DCMA 14-Point #1: every non-summary, non-milestone
+    # AACE 29R-03 §2.1.B.5 / DCMA 14-Point #1: every non-summary, non-milestone
     # activity must participate in at least one logic tie. Milestones and
     # LOE/WBS rows are excluded because:
     #   - LOE / WBS-summary rows are roll-ups, not work items;
@@ -1855,7 +1862,7 @@ def validate_schedule(data, profile='commercial', subject=None):
     if non_summary_tasks and not real_taskpred_rows:
         report.add(Finding(
             severity=BLOCK,
-            check_id='AACE-31R-03-NO-TASKPRED',
+            check_id='XER-NO-TASKPRED',
             message=(
                 f'Schedule has {len(non_summary_tasks)} non-summary, non-milestone '
                 f'activities but zero TASKPRED relationships tie any of them — no work logic exists'
@@ -1865,7 +1872,7 @@ def validate_schedule(data, profile='commercial', subject=None):
                 'total_taskpred_count': len(taskpred),
                 'real_work_taskpred_count': 0,
             },
-            reference='AACE 31R-03 §3.6 / DCMA 14-Point #1',
+            reference='AACE 29R-03 §2.1.B.5 / DCMA 14-Point #1',
         ))
 
     # ── Calendar-with-holidays sanity ────────────────────────────────
@@ -1879,7 +1886,7 @@ def validate_schedule(data, profile='commercial', subject=None):
                     check_id='XER-CALENDAR-HOLIDAYS-EMPTY',
                     message=f"Calendar {cal.get('clndr_name')!r} is named 'with holidays' but has zero holidays parsed",
                     evidence={'clndr_id': cid, 'clndr_name': cal.get('clndr_name', '')},
-                    reference='AACE 53R-06 §4.2',
+                    reference='AACE 29R-03 §2.1.B.10 (calendar validation)',
                 ))
 
     # ── Encoding info ────────────────────────────────
@@ -1890,14 +1897,20 @@ def validate_schedule(data, profile='commercial', subject=None):
             check_id='XER-ENCODING-UNUSUAL',
             message=f'XER was decoded with unusual encoding {enc!r}',
             evidence={'encoding_used': enc},
-            reference='AACE 53R-06 §4.1',
+            reference='P6 XER file encoding',
         ))
 
     return report
 
 
 def aace_31r_compliance(data, profile='commercial'):
-    """AACE 31R-03 compliance score (0–100) for an XER schedule.
+    """Schedule structure score (0–100) for an XER schedule.
+
+    The function name is legacy: AACE 31R-03 is a cost-estimate RP
+    ("Reviewing, Validating, and Documenting the Estimate") and does not
+    govern these checks. The name is kept for API compatibility; the
+    underlying findings cite AACE 29R-03 §2.1, AACE 38R-06 §3.5, DCMA
+    14-Point, and the P6 XER schema (see validate_schedule).
 
     Scoring:
       - Start at 100
@@ -2092,7 +2105,7 @@ _HALF_STEP_FORBIDDEN_FIELDS = frozenset({
 def compute_half_step_xer(base_xer_path, updated_xer_path, output_xer_path):
     """Generate an AACE 29R-03 MIP 3.4 half-step XER from two sequential schedule updates.
 
-    AACE 29R-03 MIP 3.4 — Modelled / Additive / Multiple Base — Contemporaneous
+    AACE 29R-03 MIP 3.4 — Observational / Dynamic / Contemporaneous
     Split: start with the period-START schedule (base), apply ONLY the progress
     fields (actual dates, remaining duration, percent complete, status) from the
     next update, and output a "half-step" schedule.  The result isolates the
@@ -2148,7 +2161,7 @@ def compute_half_step_xer(base_xer_path, updated_xer_path, output_xer_path):
         logic-revision layer, not the progress layer.
 
     Attribution:
-        AACE 29R-03 MIP 3.4 "Modelled / Additive / Multiple Base — Contemporaneous
+        AACE 29R-03 MIP 3.4 "Observational / Dynamic / Contemporaneous
         Split"; CPP cpm-engine v2.2 half-step generator.
     """
     import copy

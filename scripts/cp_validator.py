@@ -185,7 +185,7 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         dict with all findings, scores, recommendations, a `dcma_14` block,
         and a `driver_chain_narrative` block (one narrative per critical
         activity, walking driving predecessors back to project start per
-        AACE RP 49R-06 §6).
+        AACE RP 49R-06, "Longest Path").
     """
     tasks_all = get_table(data, 'TASK')
     preds_all = get_table(data, 'TASKPRED')
@@ -1135,7 +1135,7 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             'error': f'DCMA 14 assessment unavailable: {type(e).__name__}: {e}',
         }
 
-    # ── DRIVER-CHAIN NARRATIVE (AACE 49R-06 §6) ──────────────────────
+    # ── DRIVER-CHAIN NARRATIVE (AACE 49R-06, "Longest Path") ──────────────────────
     # For each critical activity, walk driving predecessors back to project
     # start and emit a natural-language explanation. Reuses the (_lpm_acts,
     # _lpm_rels) lists built for Check 2's LPM cross-check so the same
