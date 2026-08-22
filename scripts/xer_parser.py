@@ -301,13 +301,28 @@ def parse_xer(filepath, encoding=None):
         # ERMHDR — file header
         if line.startswith('ERMHDR'):
             parts = line.split('\t')
+            # Canonical 9-field P6 ERMHDR layout (positional):
+            #   parts[0] ERMHDR
+            #   parts[1] version
+            #   parts[2] export_date
+            #   parts[3] export/project flag (e.g. 'Project')
+            #   parts[4] user_login        (the export user — chain of custody)
+            #   parts[5] user_full_name
+            #   parts[6] database
+            #   parts[7] module
+            #   parts[8] currency          (the file's currency unit)
+            # Only set a field when its index exists so shorter legacy
+            # headers do not get mislabeled values from the wrong slot.
             result['ermhdr'] = {
                 'raw': parts,
                 'version': parts[1] if len(parts) > 1 else '',
                 'export_date': parts[2] if len(parts) > 2 else '',
-                'user': parts[3] if len(parts) > 3 else '',
-                'database': parts[4] if len(parts) > 4 else '',
-                'currency': parts[5] if len(parts) > 5 else '',
+                'export_flag': parts[3] if len(parts) > 3 else '',
+                'user': parts[4] if len(parts) > 4 else '',
+                'user_full_name': parts[5] if len(parts) > 5 else '',
+                'database': parts[6] if len(parts) > 6 else '',
+                'module': parts[7] if len(parts) > 7 else '',
+                'currency': parts[8] if len(parts) > 8 else '',
             }
             continue
 
