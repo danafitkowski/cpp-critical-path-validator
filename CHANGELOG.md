@@ -22,7 +22,7 @@ Initial public release. Companion to [`cpp-cpm-engine`](https://github.com/danaf
   9. Constraint saturation (schedule-wide)
 - **CP Confidence Score** — weighted across all 9 checks (weights sum to 1.00), reported as 0–100 with band thresholds at 80 / 60 / 40.
 - **HTML dashboard output** (`generate_dashboard`) — self-contained dashboard with RAG status grid, CP activities table, near-critical table, recommendations table, and open-ends table.
-- **DCMA 14-Point Assessment** (`dcma_14_assess`) — full DCMA implementation following FAR Part 49, DFARS 234.2, AACE 49R-06, and NDIA PASEG §10. Returns a structured report with per-check severity, value, threshold, message, and details.
+- **DCMA 14-Point Assessment** (`dcma_14_assess`) — full DCMA implementation following DCMA-EA PAM 200.1 (the 14 metrics' actual home; this entry originally said "FAR Part 49, DFARS 234.2", which do not define them), AACE 49R-06, and NDIA PASEG. Returns a structured report with per-check severity, value, threshold, message, and details.
 - **Three profiles bundled**: `commercial`, `nuclear`, `mining`. External users can clone and mutate any profile dict.
 - **Driving path tracer** (`trace_driving_path`) — walks driving-predecessor chains for any activity.
 - **Multiple critical path detection** — identifies when the schedule has more than one distinct CP.

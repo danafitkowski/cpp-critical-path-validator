@@ -41,7 +41,7 @@ The critical path is the single most consequential output of any schedule. Bid p
 
 And yet — in the field — far too many critical paths are *artificial*: forced by hard constraints, broken by open ends, made fragile by negative lags, or unconnected to the project finish milestone. A scheduler who relies on the CP without first auditing whether the CP is real is making a load-bearing decision on unverified ground.
 
-This validator was built to drive court-filed forensic schedule analysis, so the audit is rigorous. Every finding is structured, cited (DCMA, AACE 49R-06, AACE 24R-03), and includes the full list of affected activities — never truncated.
+This validator was built to drive court-filed forensic schedule analysis, so the audit is rigorous. Every finding is structured, cited (DCMA-EA PAM 200.1, AACE 49R-06), and includes the full list of affected activities — never truncated.
 
 ---
 
@@ -193,10 +193,16 @@ The validator cites:
 | Reference                      | What it covers                                                   |
 |--------------------------------|------------------------------------------------------------------|
 | AACE Recommended Practice 49R-06 | Identifying the Critical Path (LPM / TFM / MFP)                |
-| AACE Recommended Practice 24R-03 | Schedule classification, constraint-driven criticality (§4)    |
-| AACE Recommended Practice 67R-11 | Forensic Schedule Analysis Competency                          |
-| DCMA 14-Point Assessment         | Federal contract schedule health (FAR Part 49, DFARS 234.2)    |
-| NDIA PASEG §10                   | Baseline Execution Index extension                             |
+| DCMA 14-Point Assessment         | The 14 schedule-quality metrics (DCMA-EA PAM 200.1)            |
+| NDIA PASEG                       | Baseline Execution Index                                         |
+
+Earlier revisions of this table also listed AACE 24R-03 and AACE 67R-11 with
+descriptions that were wrong: 24R-03 is "Developing Activity Logic", has no
+numbered sections, and is not a criticality standard; 67R-11 is "Contract Risk
+Allocation", not a forensic-competency document. Nothing in this repo cites
+either, so both rows were removed. The DCMA row previously misattributed the
+14 metrics to federal acquisition regulations; their actual home is
+DCMA-EA PAM 200.1.
 
 ---
 
