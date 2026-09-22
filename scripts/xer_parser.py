@@ -2035,6 +2035,16 @@ def generate_xer(data, output_path, p6_version='24.12', currency='CAD',
         if table_name not in written:
             _write_table(lines, table_name, tables[table_name])
 
+    # %E - end-of-file marker. Every genuine Oracle export terminates with
+    # it. Measured across a 224-file corpus of real exports: 150 carry it,
+    # 74 do not, and all 74 of those were written by this function. P6
+    # itself tolerates the omission - files this writer produced have been
+    # imported successfully - so this is
+    # format fidelity rather than a known import failure. The parser skips
+    # any line that is not %T/%F/%R, so the marker round-trips without
+    # ever becoming a table.
+    lines.append('%E')
+
     # Write with CRLF line endings
     output_text = '\r\n'.join(lines) + '\r\n'
 
