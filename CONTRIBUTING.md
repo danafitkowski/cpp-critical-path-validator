@@ -1,6 +1,6 @@
 # Contributing to `cpp-critical-path-validator`
 
-Thank you for considering a contribution. This validator is used in court-filed forensic schedule reports. Contributions are welcome and the bar is high.
+Thank you for considering a contribution. These checks come out of court-filed forensic schedule work, and anything built on them can end up in front of a court, so the bar is high. Contributions are welcome.
 
 ---
 
@@ -26,7 +26,7 @@ Thank you for considering a contribution. This validator is used in court-filed 
 
 ## Forensic-correctness rules
 
-The validator is used in court. Sloppy contributions ship as evidence.
+Write every check as though its output will be read by an opposing expert, because that is the job this validator is for. Sloppy work here becomes someone's evidence.
 
 ### No data truncation in user-facing output
 

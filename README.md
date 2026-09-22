@@ -2,14 +2,25 @@
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![status: stable](https://img.shields.io/badge/status-stable-brightgreen.svg)](CHANGELOG.md)
-[![AACE: 49R--06 / 24R--03 / 67R--11](https://img.shields.io/badge/AACE-49R--06%20%7C%2024R--03%20%7C%2067R--11-orange.svg)](#aace-alignment)
+[![tests](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml)
+[![version: 0.1.0](https://img.shields.io/badge/version-0.1.0-blue.svg)](CHANGELOG.md)
+[![AACE: 49R--06](https://img.shields.io/badge/AACE-49R--06-orange.svg)](#aace-alignment)
 
 Critical path validation, logic health assessment, and optimization recommendations for Primavera P6 schedules — plus a full DCMA 14-Point Assessment.
 
 Maintained by [Critical Path Partners](https://criticalpathpartners.ca) — a forensic-scheduling consultancy.
 
 Companion to [`cpp-cpm-engine`](https://github.com/danafitkowski/cpp-cpm-engine) and [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser).
+
+---
+
+## Scope and status
+
+This is v0.1.0, and it is a public subset. Critical Path Partners maintains a larger internal validator; what this repository publishes is the nine-check core, the DCMA 14-Point assessment, the driving-path tracer and the HTML dashboard. It does not carry every check or output the internal version has.
+
+Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
+
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at commit [`5fc6c5e`](https://github.com/danafitkowski/cpp-xer-parser/commit/5fc6c5e034f4d740040c5655763612b320068743), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 ---
 
@@ -41,7 +52,7 @@ The critical path is the single most consequential output of any schedule. Bid p
 
 And yet — in the field — far too many critical paths are *artificial*: forced by hard constraints, broken by open ends, made fragile by negative lags, or unconnected to the project finish milestone. A scheduler who relies on the CP without first auditing whether the CP is real is making a load-bearing decision on unverified ground.
 
-This validator was built to drive court-filed forensic schedule analysis, so the audit is rigorous. Every finding is structured, cited (DCMA-EA PAM 200.1, AACE 49R-06), and includes the full list of affected activities — never truncated.
+The checks in this validator come out of court-filed forensic schedule analysis, so the audit is rigorous. Every finding is structured, cited (DCMA-EA PAM 200.1, AACE 49R-06), and includes the full list of affected activities, never truncated.
 
 ---
 
@@ -227,7 +238,9 @@ All tests build their XER fixtures synthetically in memory; no real client XER f
 
 ## Integration with the CPP forensic suite
 
-Inside the Critical Path Partners internal forensic suite, this validator is the first thing to run on any new XER. It checks whether the CP is real before any forensic delay analysis, time impact analysis, or claims package work begins. When `cpp-cpm-engine` is on the same `sys.path`, the validator's Check 2 also runs an LPM-confirmed-false-CP detection that cross-validates the schedule's reported critical path against an independently-computed LPM result.
+CP validation is the first thing Critical Path Partners runs on a new XER, checking whether the CP is real before any forensic delay analysis, time impact analysis, or claims-package work begins. That job is done by the internal validator described under [Scope and status](#scope-and-status); this repository publishes its nine-check core so anyone can run the same audit.
+
+When `cpp-cpm-engine` is on the same `sys.path`, the validator's Check 2 also runs an LPM-confirmed-false-CP detection that cross-validates the schedule's reported critical path against an independently-computed LPM result.
 
 When the engine is not available, the validator gracefully degrades (Check 2 still runs the constraint-driven analysis; the LPM cross-check is skipped).
 

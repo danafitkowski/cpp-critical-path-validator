@@ -1,6 +1,6 @@
 # Security Policy
 
-`cpp-critical-path-validator` is used in production forensic delay analyses, EOT submissions, and expert-witness reports. Security defects — particularly any defect that could mislead a court — are treated as release-blocking.
+`cpp-critical-path-validator` produces findings that are meant to be relied on when judging whether a schedule's critical path is real, and its checks come out of court-facing forensic work. Any defect that could mislead a court is therefore treated as release-blocking here, whether or not it is a security defect in the conventional sense.
 
 Thank you for taking the time to report.
 
@@ -39,7 +39,7 @@ We will credit reporters in the release notes unless you ask to remain anonymous
 - **Forensic-correctness math bug that could mislead a court.** Wrong critical-path identification, wrong CPLI / BEI / float-saturation computations, wrong constraint-driven-criticality classifications, missing or mis-fired LPM-confirmed-false-CP detections, DCMA-14 thresholds applied to the wrong profile, missing or wrong Daubert disclosures. The validator's whole value proposition is courtroom defensibility — these defects rank above conventional security bugs.
 - **Information disclosure.** Leakage of XER paths or contents through error messages, leakage of customer-supplied schedule data through caches or logs, file-enumeration through user input on the CLI.
 - **Denial of service.** Malformed XER inputs that exhaust memory or CPU, regex catastrophic-backtracking attacks against alert messages, infinite loops in the driving-path tracer on cyclic logic.
-- **Supply-chain attack vectors.** The validator ships **zero third-party runtime dependencies** in production — a vendored or transitive dependency appearing in CI is itself a finding. Build-time arbitrary code execution, post-install scripts, CI secret exfiltration are in scope. Drift between the bundled `scripts/xer_parser.py` and the canonical upstream in `cpp-xer-parser` (detected by the drift CI check) is also a finding.
+- **Supply-chain attack vectors.** The validator ships **zero third-party runtime dependencies** in production — a vendored or transitive dependency appearing in CI is itself a finding. Build-time arbitrary code execution, post-install scripts, CI secret exfiltration are in scope. The bundled `scripts/xer_parser.py` is vendored from a pinned `cpp-xer-parser` commit and CI verifies it byte for byte on every push; a bundled copy that does not match its pin is a finding.
 
 ---
 
@@ -79,7 +79,7 @@ In scope:
 
 - `cpp-critical-path-validator` source on GitHub
 - The bundled `scripts/cp_validator.py`, `scripts/dcma14.py`, `scripts/validation.py`, and `scripts/config_profiles.py`
-- The bundled `scripts/xer_parser.py` mirror, where the issue is a divergence from the canonical upstream (also report upstream against `cpp-xer-parser`)
+- The bundled `scripts/xer_parser.py`, where the issue is a divergence from the upstream commit it is pinned to (also report upstream against `cpp-xer-parser`)
 - `criticalpathpartners.ca` website to the extent it advertises validator behavior
 
 Out of scope:
@@ -90,4 +90,4 @@ Out of scope:
 
 ---
 
-*Last updated: 2026-05-16.*
+*Last updated: 2026-09-02.*

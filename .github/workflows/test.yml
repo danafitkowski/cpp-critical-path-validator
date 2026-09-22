@@ -10,6 +10,12 @@ jobs:
   test:
     name: Python ${{ matrix.python }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      # The upstream commit scripts/xer_parser.py is vendored from, and the
+      # SHA-256 of that file. Re-vendoring is a two-line change: bump both
+      # together, and the checks below do the rest.
+      XER_PIN: 5fc6c5e034f4d740040c5655763612b320068743
+      XER_SHA256: 5d47ec099d79b2a0bb6c7d7bb287bd242bf06ee7384a924a5d24b0f878105bbe
     strategy:
       fail-fast: false
       matrix:
@@ -46,15 +52,56 @@ jobs:
           python tests/test_dcma14.py
           python tests/test_cp_forensic.py
 
-      - name: Check xer_parser.py drift vs cpp-xer-parser upstream
+      # The vendored parser is checked against a PINNED upstream commit rather
+      # than against `main`, and the hard check is offline.
+      #
+      # Against `main` this check went red on 2026-05-16 and stayed red through
+      # 2026-08-23. Nothing in this repo was wrong: an upstream docstring
+      # rewrite landed in cpp-xer-parser, and because the check compared with
+      # whatever `main` happened to be, an unrelated upstream edit failed every
+      # build here over text this repo does not execute. A floating comparison
+      # also cannot be reproduced: re-running the old workflow today gives a
+      # different answer than it gave in May.
+      #
+      # So the failing check is the one that needs no network at all: the
+      # vendored file must hash to the SHA-256 recorded in XER_SHA256. That is
+      # deterministic, reproducible years from now, and immune to a network
+      # blip turning the build red.
+      - name: Verify vendored xer_parser.py against its recorded pin
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         shell: bash
         run: |
-          UPSTREAM=$(curl -fsSL https://raw.githubusercontent.com/danafitkowski/cpp-xer-parser/main/scripts/xer_parser.py | sha256sum | awk '{print $1}')
           LOCAL=$(sha256sum scripts/xer_parser.py | awk '{print $1}')
-          echo "upstream: $UPSTREAM"
-          echo "local:    $LOCAL"
-          if [ "$UPSTREAM" != "$LOCAL" ]; then
-            echo "Drift detected: validator's xer_parser.py differs from cpp-xer-parser main. Re-vendor."
+          echo "recorded pin:    cpp-xer-parser@$XER_PIN"
+          echo "recorded sha256: $XER_SHA256"
+          echo "vendored sha256: $LOCAL"
+          if [ "$LOCAL" != "$XER_SHA256" ]; then
+            echo "::error::scripts/xer_parser.py does not match its recorded pin. Re-vendor from cpp-xer-parser@$XER_PIN, or bump XER_PIN and XER_SHA256 together."
             exit 1
           fi
+          echo "Vendored copy matches its recorded pin."
+
+      # Advisory only, and deliberately incapable of failing the job. It
+      # confirms the recorded pin still describes the real upstream blob, and
+      # reports when upstream has moved past it. Upstream moving on is normal
+      # and is not a defect here, so it must never turn this repo red again.
+      - name: Cross-check the pin and report upstream movement (advisory)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        shell: bash
+        run: |
+          set +e +o pipefail
+          RAW=https://raw.githubusercontent.com/danafitkowski/cpp-xer-parser
+          LOCAL=$(sha256sum scripts/xer_parser.py | awk '{print $1}')
+          PINNED=$(curl -fsSL "$RAW/$XER_PIN/scripts/xer_parser.py" | sha256sum | awk '{print $1}')
+          HEAD=$(curl -fsSL "$RAW/main/scripts/xer_parser.py" | sha256sum | awk '{print $1}')
+          echo "pinned upstream blob: $PINNED"
+          echo "upstream main blob:   $HEAD"
+          if [ "$PINNED" != "$XER_SHA256" ]; then
+            echo "::warning::Could not confirm the recorded pin against cpp-xer-parser@$XER_PIN (fetched $PINNED). Either the fetch failed or XER_PIN and XER_SHA256 disagree; check by hand."
+          fi
+          if [ "$HEAD" != "$LOCAL" ]; then
+            echo "::warning::cpp-xer-parser main ($HEAD) has moved past the vendored copy ($LOCAL). Re-vendor when convenient. This does not fail the build."
+          else
+            echo "Vendored copy is also current with cpp-xer-parser main."
+          fi
+          exit 0

@@ -4,6 +4,60 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## Unreleased
+
+Changes on `main` since the v0.1.0 tag. These are corrections to the build and to
+public claims, not new validator features.
+
+### Fixed
+
+- **CI is green again.** The last four runs (2026-05-16, 2026-08-19, 2026-08-22 and
+  2026-08-23) each failed on exactly one step, the `xer_parser.py` drift check, in
+  the single matrix job that step is gated to. Every test step passed in every job
+  in all four. The drift was real, but it was not a defect in this repo: the check
+  compared the vendored file against whatever `cpp-xer-parser`'s `main` happened to
+  be at the time, so an upstream edit could fail every build here. As of the last
+  red run the outstanding difference was 13 lines replaced by 25 across 7 hunks, all
+  of it comment and docstring text about the half-step generator plus one
+  attribution string inside `compute_half_step_xer`, which nothing in this repo
+  calls. A comparison against a moving branch is also not reproducible: re-running
+  the old workflow today does not give the answer it gave in May.
+  `scripts/xer_parser.py` is now re-vendored byte for byte from
+  `cpp-xer-parser` at [`5fc6c5e`](https://github.com/danafitkowski/cpp-xer-parser/commit/5fc6c5e034f4d740040c5655763612b320068743),
+  and the hard check verifies the bundled copy against a recorded SHA-256 with no
+  network access at all, so it is deterministic and cannot flake. A second, advisory
+  step cross-checks the pin against GitHub and reports when upstream has moved past
+  it, and is written so that it can never fail the build. The re-vendored text is
+  also the better citation: it pinpoints the half-step to AACE 29R-03 §2.3.D.2,
+  "Bifurcation: Creating a Progress-Only Half-Step Update".
+- **The AACE badge no longer advertises retracted Recommended Practices.** The README
+  badge rendered `AACE: 49R-06 | 24R-03 | 67R-11` while the AACE alignment section
+  below it explained that the 24R-03 and 67R-11 rows had been removed as wrongly
+  described. The badge now cites 49R-06 only.
+- **The `status: stable` badge is gone.** It was a hand-written shields.io literal
+  that stayed green through four consecutive red CI runs. The README now carries the
+  live GitHub Actions badge, which cannot disagree with the build, plus a version
+  badge.
+- **SECURITY.md no longer claims production expert-witness use.** Its opening line
+  said the validator "is used in production forensic delay analyses, EOT submissions,
+  and expert-witness reports". That work runs on a larger internal validator. The
+  policy now states the standard this repo holds itself to without claiming the
+  deployment, and stops calling `cpp-xer-parser` the canonical parser. CONTRIBUTING.md
+  carried the same claim twice ("This validator is used in court-filed forensic
+  schedule reports", "The validator is used in court") and is corrected the same way.
+
+### Added
+
+- **A "Scope and status" section in the README**, recording that this is a public
+  subset of a larger internal validator and recording the vendored parser's exact
+  provenance.
+- **Two citation-guard tests.** `test_no_badge_advertises_a_retracted_rp` pins the
+  badge defect above so it cannot recur, and the guard now folds the shields.io `--`
+  hyphen escape before matching. That fold is why the bad badge was invisible: every
+  pattern is written `24R-03`, and a badge spells it `24R--03`.
+
+---
+
 ## v0.1.0 — 2026-05-10
 
 Initial public release. Companion to [`cpp-cpm-engine`](https://github.com/danafitkowski/cpp-cpm-engine) and [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser).
@@ -46,7 +100,7 @@ Tested against `cpp-cpm-engine` v2.9.x (current as of 2026-05-16: v2.9.11+). Che
 
 Note on CI coverage: the public CI clones `cpp-cpm-engine` and places its `python_reference/` on `PYTHONPATH`, which proves the import wiring works. The OSS `python_reference/cpm.py` is an explicitly-stripped subset that does not currently expose `compute_lpm` (it omits surfaces beyond what the JS-Python crossval needs). The full LPM-confirmation contract is exercised inside the CPP internal `_cpp_common` tree where `compute_lpm` is bundled. Once `cpp-cpm-engine`'s OSS python_reference is expanded to include `compute_lpm`, the public CI will exercise the full contract automatically — no validator change required, the test will stop skipping.
 
-The bundled `scripts/xer_parser.py` mirrors `cpp-xer-parser` v0.1.x. A CI drift check fails the build if the mirrored copy diverges from the upstream canonical copy; re-vendor when intentional changes are needed.
+The bundled `scripts/xer_parser.py` mirrors `cpp-xer-parser` v0.1.x, verified in CI. See Unreleased for how that check works now.
 
 ### Companion repos
 
