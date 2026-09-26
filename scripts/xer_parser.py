@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-XER Parser & Generator — Canonical Primavera P6 XER Engine
-==========================================================
-Single source of truth for all XER file operations across all skills.
+XER Parser & Generator — Primavera P6 XER reader and writer
+===========================================================
+Standalone parsing and generation core: no third-party runtime dependencies.
+See the repository README for what this package covers, and for the validation
+that Critical Path Partners runs on top of it and does not publish here.
 
 Usage:
     PARSING:
@@ -48,19 +50,25 @@ _CPP_COMMON = os.path.normpath(os.path.join(_SCRIPT_DIR, '..', '..', '_cpp_commo
 if os.path.isdir(_CPP_COMMON) and _CPP_COMMON not in sys.path:
     sys.path.insert(0, _CPP_COMMON)
 
-# Imports from _cpp_common are guarded so xer_parser stays useful in
-# callers that don't have the common module available (e.g. embedded packaging).
+# Optional imports, guarded so xer_parser stays useful in callers that do not
+# have the wider CPP common module available (e.g. embedded packaging, or this
+# repository on its own).
+#
+# The two groups are imported SEPARATELY on purpose. `validation.py` and
+# `config_profiles.py` ship in this repository's own scripts/ directory, so a
+# plain clone can bind them; `audit_trail` does not ship here. Importing all
+# three in one try block meant a missing `audit_trail` discarded the two
+# modules that were present, and `validate_schedule` / `aace_31r_compliance`
+# raised RuntimeError on a clean clone even though their dependencies were
+# sitting next to them. Keep these blocks separate.
 try:
-    from audit_trail import generate_manifest, render_manifest_block  # noqa: F401
     from validation import Finding, ValidationReport, BLOCK, WARN, INFO, PASS
     from config_profiles import get_profile
-    _CPP_COMMON_AVAILABLE = True
+    _VALIDATION_AVAILABLE = True
 except ImportError:
-    _CPP_COMMON_AVAILABLE = False
-    # Stub placeholders so the names are bound — callers who need the real ones
-    # should ensure _cpp_common is on sys.path.
-    generate_manifest = None
-    render_manifest_block = None
+    _VALIDATION_AVAILABLE = False
+    # Stub placeholders so the names are bound. The severity constants keep
+    # their real values so callers can compare against them either way.
     Finding = None
     ValidationReport = None
     BLOCK = 'BLOCK'
@@ -68,6 +76,18 @@ except ImportError:
     INFO = 'INFO'
     PASS = 'PASS'
     get_profile = None
+
+try:
+    from audit_trail import generate_manifest, render_manifest_block  # noqa: F401
+    _AUDIT_TRAIL_AVAILABLE = True
+except ImportError:
+    _AUDIT_TRAIL_AVAILABLE = False
+    generate_manifest = None
+    render_manifest_block = None
+
+# Retained for callers that check the old flag: true only when BOTH groups
+# resolved, which is what it meant before the split.
+_CPP_COMMON_AVAILABLE = _VALIDATION_AVAILABLE and _AUDIT_TRAIL_AVAILABLE
 
 # ─────────────────────────────────────────────
 # PUBLIC API

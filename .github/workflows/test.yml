@@ -14,8 +14,8 @@ jobs:
       # The upstream commit scripts/xer_parser.py is vendored from, and the
       # SHA-256 of that file. Re-vendoring is a two-line change: bump both
       # together, and the checks below do the rest.
-      XER_PIN: 5fc6c5e034f4d740040c5655763612b320068743
-      XER_SHA256: 5d47ec099d79b2a0bb6c7d7bb287bd242bf06ee7384a924a5d24b0f878105bbe
+      XER_PIN: a8edac6f2ef19f6cddb02dee51dc320f99f6ba38
+      XER_SHA256: 96edf66b18819e556f891a2a11e3a50240808506ffda32ad3644effe34fa1796
     strategy:
       fail-fast: false
       matrix:
