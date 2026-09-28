@@ -51,6 +51,7 @@ jobs:
           python tests/test_cp_validator.py
           python tests/test_dcma14.py
           python tests/test_cp_forensic.py
+          python tests/test_logic_continuity_completion_anchor_2026_09_28.py
 
       # The vendored parser is checked against a PINNED upstream commit rather
       # than against `main`, and the hard check is offline.

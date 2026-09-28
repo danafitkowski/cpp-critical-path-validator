@@ -6,10 +6,48 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ## Unreleased
 
-Changes on `main` since the v0.1.0 tag. These are corrections to the build, to public
-claims and to the bundled parser's output, not new validator features.
+Changes on `main` since the v0.1.0 tag: corrections to the build, to public claims,
+to the bundled parser's output, and to how Check 8 finds where the project
+finishes. No check has been added.
 
 ### Fixed
+
+- **Logic continuity (Check 8) traces to where the project finishes.** Check 8 walks
+  predecessors back from the project's completion anchors and reports every
+  incomplete activity it does not reach as having no path to completion. The anchors
+  were the critical finish milestones (`TT_FinMile`), or every finish milestone when
+  none was critical, and nothing else. Two shapes of schedule read most or all of a
+  connected network as disconnected, logic continuity RED 20 with one recommendation
+  per activity:
+  - *A network that ends in an ordinary task.* Check 3 accepted that task as the end
+    of the network and listed it in `terminal_milestones`, while Check 8, which
+    anchored only on finish milestones, reported the work leading to it as
+    disconnected. Check 8 now takes Check 3's terminals as anchors, so the two checks
+    agree.
+  - *A chain behind an As Late As Possible finish milestone.* ALAP places a finish
+    milestone against its successor's early start, so one with work after it carries
+    that work's float and reads critical ahead of critical work. When it was the only
+    critical finish milestone it became the only anchor, and if the activity that sets
+    the project finish has a successor that floats (a negative lag, an SS or FF tie),
+    everything not upstream of the milestone read as disconnected. Such a milestone is
+    now a gate: it paces the work after it and no longer counts as a finish milestone.
+
+  The trace also starts from where the network ends: the incomplete activity or
+  activities with the latest stored early finish among those tied to at least one
+  other work activity, and the open ends reached from them through unfinished work.
+  Only linked work can set the finish, so an unlinked activity dated late no longer
+  takes the real finish's place. These anchors only add to the others, so a schedule
+  with a real finish milestone reads as before. The fallback to every finish milestone
+  still fires only when no finish milestone is critical, a critical gate included. An
+  activity with no logic can still anchor the trace as a finish milestone under that
+  fallback or as a Check 3 terminal, and Check 3 then reports its missing predecessor.
+
+  The one case that now reports more is a gate whose successors lead nowhere: the
+  gate, and any work whose only way forward runs through it, had counted as connected
+  because the gate itself was an anchor, and are now reported as disconnected. One
+  trade-off is kept by design: the latest finisher with logic is taken as the end even
+  when it is a stray dead end, because nothing separates it from a real last activity.
+  Check 3 still reports its missing successor.
 
 - **CI is green again.** The last four runs (2026-05-16, 2026-08-19, 2026-08-22 and
   2026-08-23) each failed on exactly one step, the `xer_parser.py` drift check, in
@@ -75,8 +113,26 @@ claims and to the bundled parser's output, not new validator features.
   carried the same claim twice ("This validator is used in court-filed forensic
   schedule reports", "The validator is used in court") and is corrected the same way.
 
+### Changed
+
+- **`finish_milestones_found` in Check 8's result** counts the finish milestones and
+  Check 3's terminals among the anchors. It counted the finish milestones the trace
+  started from (every one when none was critical); gates are no longer counted, and
+  Check 3's terminals now are.
+
 ### Added
 
+- **`completion_anchors` and `gate_milestones` in Check 8's result**: the task codes
+  the trace started from, and the As Late As Possible finish milestones set aside as
+  gates.
+- **`tests/test_logic_continuity_completion_anchor_2026_09_28.py`**, 17 tests on
+  synthetic data: the ALAP pattern, dated by hand from P6's scheduling rules, a dangling branch
+  that is still reported, the gate under the every-finish-milestone fallback, a
+  schedule with a real finish milestone that reads as before, what can and cannot be
+  the end (an unlinked activity, a schedule with no logic, a critical gate, finished
+  work, a level of effort, ALAP as the secondary constraint, no stored early dates,
+  and the trade-off above), and a chain with no early dates that ends in an ordinary
+  task. CI runs it under pytest and directly.
 - **A "Scope and status" section in the README**, recording that this is a public
   subset of a larger internal validator and recording the vendored parser's exact
   provenance.

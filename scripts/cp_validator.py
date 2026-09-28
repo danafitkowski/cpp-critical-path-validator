@@ -164,6 +164,49 @@ def _has_hard_constraint(task):
     return bool(set(_get_constraints(task)) & HARD_CONSTRAINTS)
 
 
+def _stored_instant(value):
+    """A stored P6 date ('YYYY-MM-DD HH:MM', or a bare date) as a datetime;
+    None when blank or unreadable."""
+    text = str(value or '').strip()
+    for fmt, width in (('%Y-%m-%d %H:%M', 16), ('%Y-%m-%d', 10)):
+        try:
+            return datetime.strptime(text[:width], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _is_alap_gate(task, succ_map, work_ids):
+    """An As Late As Possible finish milestone with work after it.
+
+    P6 places it against its successor's early start, so it carries that
+    successor's float: it paces the work after it and is not where the project
+    completes. A level of effort after it is not work."""
+    return (task.get('task_type', '') == 'TT_FinMile'
+            and 'CS_ALAP' in _get_constraints(task)
+            and any(s.get('task_id', '') in work_ids
+                    for s in succ_map.get(task['task_id'], [])))
+
+
+def _finish_setters(incomplete_tasks, preds, work_ids):
+    """The incomplete activity or activities that set the project's early
+    finish: the latest stored early finish among those tied to at least one
+    other work activity.
+
+    An activity with no logic never sets the finish, and one dated after the
+    real finish must not take the real finish's place. Empty when no linked
+    activity carries a stored early finish."""
+    linked = set()
+    for p in preds:
+        succ, pred = p.get('task_id', ''), p.get('pred_task_id', '')
+        if succ != pred and succ in work_ids and pred in work_ids:
+            linked.update((succ, pred))
+    finish = {t['task_id']: _stored_instant(t.get('early_end_date', ''))
+              for t in incomplete_tasks if t['task_id'] in linked}
+    latest = max((v for v in finish.values() if v is not None), default=None)
+    return {tid for tid, v in finish.items() if v is not None and v == latest}
+
+
 # ─────────────────────────────────────────────────────────────────────
 # MAIN VALIDATION FUNCTION
 # ─────────────────────────────────────────────────────────────────────
@@ -955,26 +998,81 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     }
 
     # ── CHECK 8: Logic Continuity to Completion ────────────────────
-    # Find the project completion milestone(s). P6 has a single finish-milestone
+    # Find the project completion anchor(s). P6 has a single finish-milestone
     # type (TT_FinMile); TT_Mile is a start milestone. Don't widen to
     # MILESTONE_TASK_TYPES here or we'd treat every start milestone as a
     # completion anchor.
-    finish_milestones = set()
-    for t in work_tasks:
-        if t.get('task_type', '') == 'TT_FinMile' and t['task_id'] in cp_task_ids:
-            finish_milestones.add(t['task_id'])
+    #
+    # The anchors include CHECK 3's `terminal_ids`. Taken alone, the TT_FinMile
+    # set finds no anchor on a network that ends in a plain task, so every
+    # critical activity reads "disconnected" (RED) while open_ends_cp is GREEN
+    # and terminal_milestones lists the very task this check could not trace
+    # to. One report cannot say the path is both continuous and disconnected.
+    #
+    # Position, not task type, decides the rest. A finish milestone set As Late
+    # As Possible with work after it is a gate, not a completion
+    # (_is_alap_gate): it carries its successor's float and reads critical
+    # ahead of critical work. When such a gate is the only critical finish
+    # milestone it becomes the only anchor; if the activity that sets the
+    # project finish has a successor that floats (a negative lag, an SS or FF
+    # tie), CHECK 3 finds no terminal either, and everything not upstream of
+    # the gate reads disconnected (RED 20). The gates are set aside, and the
+    # trace also starts from where the network ends, whatever the task type:
+    # the activity or activities that set the project's early finish
+    # (_finish_setters), and the open ends reached from them through
+    # unfinished work. Those only add anchors, so a schedule with a real finish
+    # milestone reads as before. Only an activity tied to other work can set
+    # the finish, and finished work is not where the remaining work ends. One
+    # trade-off is left by design: the latest finisher with logic is taken as
+    # the end even when it is a stray dead end, because nothing separates it
+    # from a real last activity without losing those; CHECK 3 still reports
+    # its missing successor.
+    _work_task_ids = {t['task_id'] for t in work_tasks}
+    gate_milestones = {t['task_id'] for t in work_tasks
+                       if _is_alap_gate(t, succ_map, _work_task_ids)}
+    critical_finish = {t['task_id'] for t in work_tasks
+                       if t.get('task_type', '') == 'TT_FinMile' and t['task_id'] in cp_task_ids}
+    finish_milestones = critical_finish - gate_milestones
 
-    # If no critical finish milestones, find any finish milestone
-    if not finish_milestones:
+    # If no critical finish milestones, find any finish milestone. A critical
+    # gate still counts as one here, so the fallback fires where it always did.
+    if not critical_finish:
         for t in work_tasks:
-            if t.get('task_type', '') == 'TT_FinMile':
+            if t.get('task_type', '') == 'TT_FinMile' and t['task_id'] not in gate_milestones:
                 finish_milestones.add(t['task_id'])
 
+    # Always fold in CHECK 3's terminals, so the two checks agree on where the
+    # network ends; they are already ids among our tasks. CHECK 3 accepts any
+    # critical milestone with no successor as a terminal, a start milestone
+    # included and whatever its date, so this check inherits that rule.
+    finish_milestones |= {tid for tid in terminal_ids if tid in all_task_ids}
+
+    # Where the network ends: the activity or activities that set the
+    # project's early finish, and every open end reached from them along
+    # successor links through unfinished work. A successor of the
+    # finish-setting activity finishes no later than it does (a negative lag,
+    # an SS or FF tie), so it is the tail of the network, not work outside it.
+    finish_setters = _finish_setters(incomplete_tasks, preds, _work_task_ids)
+    _unfinished = {t['task_id'] for t in incomplete_tasks}
+    completion_anchors = finish_milestones | finish_setters
+    _reached = set(finish_setters)
+    _walk = list(finish_setters)
+    while _walk:
+        _cur = _walk.pop()
+        _after = [s.get('task_id', '') for s in succ_map.get(_cur, [])
+                  if s.get('task_id', '') in _unfinished]
+        if not _after:
+            completion_anchors.add(_cur)
+        for _sid in _after:
+            if _sid not in _reached:
+                _reached.add(_sid)
+                _walk.append(_sid)
+
     # Trace successor chains to find disconnected activities
-    # BFS from each finish milestone backwards
+    # BFS from each completion anchor backwards
     connected_to_finish = set()
-    if finish_milestones:
-        queue = list(finish_milestones)
+    if completion_anchors:
+        queue = list(completion_anchors)
         while queue:
             current = queue.pop(0)
             if current in connected_to_finish:
@@ -1027,7 +1125,14 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         'disconnected_count': disc_count,
         'disconnected_on_cp': disc_on_cp,
         'disconnected_activities': disconnected,  # full list — no silent truncation
+        # the finish milestones and CHECK 3 terminals among the anchors; every
+        # anchor the trace started from; the ALAP finish milestones set aside
+        # as gates
         'finish_milestones_found': len(finish_milestones),
+        'completion_anchors': sorted(task_map[tid].get('task_code', tid)
+                                     for tid in completion_anchors),
+        'gate_milestones': sorted(task_map[tid].get('task_code', tid)
+                                  for tid in gate_milestones),
     }
 
     for d in disconnected:
