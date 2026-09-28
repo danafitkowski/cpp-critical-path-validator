@@ -6,8 +6,8 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ## Unreleased
 
-Changes on `main` since the v0.1.0 tag. These are corrections to the build and to
-public claims, not new validator features.
+Changes on `main` since the v0.1.0 tag. These are corrections to the build, to public
+claims and to the bundled parser's output, not new validator features.
 
 ### Fixed
 
@@ -22,14 +22,43 @@ public claims, not new validator features.
   attribution string inside `compute_half_step_xer`, which nothing in this repo
   calls. A comparison against a moving branch is also not reproducible: re-running
   the old workflow today does not give the answer it gave in May.
-  `scripts/xer_parser.py` is now re-vendored byte for byte from
-  `cpp-xer-parser` at [`5fc6c5e`](https://github.com/danafitkowski/cpp-xer-parser/commit/5fc6c5e034f4d740040c5655763612b320068743),
+  `scripts/xer_parser.py` was re-vendored byte for byte from
+  `cpp-xer-parser` at [`5fc6c5e`](https://github.com/danafitkowski/cpp-xer-parser/commit/5fc6c5e034f4d740040c5655763612b320068743)
+  (the pin has since moved to `a8edac6`; see below),
   and the hard check verifies the bundled copy against a recorded SHA-256 with no
   network access at all, so it is deterministic and cannot flake. A second, advisory
   step cross-checks the pin against GitHub and reports when upstream has moved past
   it, and is written so that it can never fail the build. The re-vendored text is
   also the better citation: it pinpoints the half-step to AACE 29R-03 §2.3.D.2,
   "Bifurcation: Creating a Progress-Only Half-Step Update".
+- **`generate_xer` writes the `%E` end-of-file marker.** Every genuine Primavera P6
+  export ends with a `%E` line, and the generator in the bundled
+  `scripts/xer_parser.py` never wrote one. P6 tolerates the omission, so this is
+  format fidelity rather than a known import failure, but a generated file that
+  drops a marker every real export carries is not round-trip faithful, and a stricter
+  reader may reject it. The reader skips any line that is not `%T`, `%F` or `%R`, so
+  the marker never comes back as a table. The change was first made to the vendored
+  copy by hand on 2026-09-22. It is the same change as upstream
+  [`9d63173`](https://github.com/danafitkowski/cpp-xer-parser/commit/9d63173758da993f02685a535c82e0956a8183bd),
+  and the re-vendor below replaced the hand edit with the upstream file.
+- **The vendored parser is back on its pin, and CI is green again.** The hand edit
+  above changed `scripts/xer_parser.py` without bumping `XER_PIN` and `XER_SHA256`, so
+  the push of 2026-09-22 failed the offline pin check, in the one matrix job that step
+  is gated to, with every test step green. On 2026-09-26 the file was re-vendored byte
+  for byte from `cpp-xer-parser` at
+  [`a8edac6`](https://github.com/danafitkowski/cpp-xer-parser/commit/a8edac6f2ef19f6cddb02dee51dc320f99f6ba38),
+  which carries the same `%E` fix, and the pin now records that commit and its
+  SHA-256. The one other upstream change it brings is
+  [`389ee14`](https://github.com/danafitkowski/cpp-xer-parser/commit/389ee1432fab848ec26219eb5e9a472a09e85739).
+  The parser's docstring no longer calls it the canonical P6 XER engine and the single
+  source of truth for every XER operation. Its optional imports are split, so the
+  `validation` and `config_profiles` modules this repository ships now bind although
+  `audit_trail` does not ship here. On a plain clone `validate_schedule` raised
+  `RuntimeError` before and now runs. `aace_31r_compliance` now gets past the import
+  but still raises `AttributeError`: it calls `ValidationReport.count`, which upstream
+  added to its own `validation.py` in the same commit and which this repository's
+  bundled `validation.py` does not have yet. The README's provenance line kept naming
+  `5fc6c5e` after the re-vendor; it now names `a8edac6`.
 - **The AACE badge no longer advertises retracted Recommended Practices.** The README
   badge rendered `AACE: 49R-06 | 24R-03 | 67R-11` while the AACE alignment section
   below it explained that the 24R-03 and 67R-11 rows had been removed as wrongly
