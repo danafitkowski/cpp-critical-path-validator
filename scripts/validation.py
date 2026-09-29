@@ -5,7 +5,8 @@ Public, standalone subset of the validation primitives used by cp_validator
 and dcma14. The full version lives inside the Critical Path Partners
 internal `_cpp_common` module and carries additional plumbing for the
 forensic-suite-wide audit trail. This subset is sufficient for the OSS
-critical-path-validator to run end-to-end.
+critical-path-validator, and for `xer_parser.validate_schedule` and
+`xer_parser.aace_31r_compliance`, to run end-to-end from a plain clone.
 
 The four severity sentinels (BLOCK / WARN / INFO / PASS) are plain strings —
 matching the public-API contract of the full version — so any code that
@@ -86,6 +87,16 @@ class ValidationReport:
     def by_severity(self, severity: str) -> List[Finding]:
         """Return findings filtered to one severity level."""
         return [f for f in self.findings if f.severity == severity]
+
+    def count(self, severity: str) -> int:
+        """Return the number of findings at one severity level.
+
+        Carried alongside `counts()` because callers use both shapes:
+        `xer_parser.aace_31r_compliance` scores a schedule by calling
+        `count(BLOCK)` and `count(WARN)` directly, so a subset without this
+        method makes that function raise AttributeError on a plain clone.
+        """
+        return sum(1 for f in self.findings if f.severity == severity)
 
     def counts(self) -> Dict[str, int]:
         """Return a dict of severity → count over all findings."""
