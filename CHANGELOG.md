@@ -156,14 +156,15 @@ finishes. No check has been added.
 - **`completion_anchors` and `gate_milestones` in Check 8's result**: the task codes
   the trace started from, and the As Late As Possible finish milestones set aside as
   gates.
-- **`tests/test_logic_continuity_completion_anchor_2026_09_28.py`**, 17 tests on
-  synthetic data: the ALAP pattern, dated by hand from P6's scheduling rules, a dangling branch
-  that is still reported, the gate under the every-finish-milestone fallback, a
-  schedule with a real finish milestone that reads as before, what can and cannot be
-  the end (an unlinked activity, a schedule with no logic, a critical gate, finished
-  work, a level of effort, ALAP as the secondary constraint, no stored early dates,
-  and the trade-off above), and a chain with no early dates that ends in an ordinary
-  task. CI runs it under pytest and directly.
+- **`tests/test_logic_continuity_completion_anchor_2026_09_28.py`**, 19 tests on
+  synthetic data: the ALAP pattern, dated by hand from P6's scheduling rules, a
+  dangling branch that is still reported, the gate under the every-finish-milestone
+  fallback, a schedule with a real finish milestone that reads as before, what can and
+  cannot be the end (an unlinked activity, a schedule with no logic, a critical gate,
+  finished work, a level of effort after a milestone and a tie to one, ALAP as the
+  secondary constraint, no stored early dates, a tie from the last task to itself, and
+  the trade-off above), and a chain with no early dates that ends in an ordinary task.
+  CI runs it under pytest and directly.
 - **`tests/test_open_ends_terminal_position_2026_09_28.py`**, 17 tests on synthetic
   data: the early finish milestone and the contract milestone that used to be
   excused, the working-day match on the activity's own calendar, unlinked and undated

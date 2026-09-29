@@ -477,8 +477,8 @@ def test_the_latest_finisher_with_logic_is_taken_as_the_end():
     # A trade-off, stated rather than hidden. S550 follows B510 and finishes
     # after the finish milestone with no successor. By position it is where
     # the network ends, so Check 8 anchors on it: no rule separates it from a
-    # real last activity without losing those. Check 3 still reports its
-    # missing successor.
+    # real last activity without losing those. S550 floats, so Check 3 does
+    # not take it as its terminal and reports its missing successor.
     rows = _fallback_rows() + [
         _row('550', 'S550', 'Stray punch list', 'C5', 40, '2027-03-08 08:00',
              '2027-03-12 17:00', '2027-03-22 08:00', _MUST_FINISH_BY, 80),
@@ -487,7 +487,35 @@ def test_the_latest_finisher_with_logic_is_taken_as_the_end():
                   scd_end='2027-03-12 17:00', plan_end=_MUST_FINISH_BY)
     assert 'S550' in _continuity(r)['completion_anchors']
     assert _disconnected(r) == ['G530', 'P520', 'X540']
-    assert 'S550' in {e['task_code'] for e in r['open_ends']['no_succ']}
+    s550 = next(e for e in r['open_ends']['no_succ'] if e['task_code'] == 'S550')
+    assert s550['is_terminal'] is False
+    assert any(f['category'] == 'Open Ends' and f['affected_activity'] == 'S550'
+               for f in r['recommendations'])
+
+
+def test_a_self_loop_on_the_last_task_leaves_it_the_open_end():
+    # P6 never writes a tie from an activity to itself; other tools can. The
+    # props removal tied to itself is still where its chain ends.
+    r = _validate(_slab_rows(), _SLAB_RELS + [('230', '230', 'PR_FS', 0)])
+    assert _disconnected(r) == []
+    assert _continuity(r)['completion_anchors'] == ['N220', 'N230']
+
+
+def test_a_tie_to_a_level_of_effort_is_not_logic():
+    # L800 finishes after the cure and its only tie is into a hammock. A level
+    # of effort is not work, so L800 is not linked: it never sets the finish,
+    # and the chain still anchors on the cure.
+    rows = _slab_rows() + [
+        _row('800', 'L800', 'Site clean-up', 'C5', 8, '2027-05-05 08:00',
+             '2027-05-05 17:00', '2027-05-05 08:00', '2027-05-05 17:00', ''),
+        _row('810', 'H810', 'Supervision', 'C5', 0, DATA_DATE,
+             '2027-05-05 17:00', DATA_DATE, '2027-05-05 17:00', '',
+             ttype='TT_LOE'),
+    ]
+    r = _validate(rows, _SLAB_RELS + [('810', '800', 'PR_FF', 0)],
+                  scd_end='2027-05-05 17:00')
+    assert _disconnected(r) == ['L800']
+    assert _continuity(r)['completion_anchors'] == ['N220', 'N230']
 
 
 # ──────────────────── Check 3's terminal anchors a file with no early dates

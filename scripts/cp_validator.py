@@ -1137,8 +1137,9 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     _walk = list(finish_setters)
     while _walk:
         _cur = _walk.pop()
+        # a tie from an activity to itself is not work after it
         _after = [s.get('task_id', '') for s in succ_map.get(_cur, [])
-                  if s.get('task_id', '') in _unfinished]
+                  if s.get('task_id', '') in _unfinished and s.get('task_id', '') != _cur]
         if not _after:
             completion_anchors.add(_cur)
         for _sid in _after:
