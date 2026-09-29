@@ -305,16 +305,17 @@ def _fallback_rows(gate_cstr='CS_ALAP', with_branch=True, branch_ttype='TT_Task'
              _FALLBACK_FINISH, '2027-03-22 08:00', _MUST_FINISH_BY, 120),
         _milestone('590', 'FIN', 'Works complete', _FALLBACK_FINISH,
                    _MUST_FINISH_BY, 120, cstr=''),
+        # 18 working days (144 h) between each early and late finish
         _row('520', 'P520', 'Prepare the submittal', 'C5', 8,
              '2027-03-01 08:00', '2027-03-01 17:00', '2027-03-25 08:00',
-             '2027-03-25 17:00', 152),
+             '2027-03-25 17:00', 144),
         _milestone('530', 'G530', 'Submittal reviewed', '2027-03-01 17:00',
-                   '2027-03-25 17:00', 152, cstr=gate_cstr),
+                   '2027-03-25 17:00', 144, cstr=gate_cstr),
     ]
     if with_branch:
         rows.append(_row('540', 'X540', 'Install the sample', 'C5', 8,
                          '2027-03-02 08:00', '2027-03-02 17:00',
-                         '2027-03-26 08:00', _MUST_FINISH_BY, 152,
+                         '2027-03-26 08:00', _MUST_FINISH_BY, 144,
                          ttype=branch_ttype))
     return rows
 
@@ -350,6 +351,22 @@ def test_a_finish_milestone_not_set_alap_keeps_its_anchor():
     r = _fallback(gate_cstr='')
     assert _disconnected(r) == ['X540']
     assert _continuity(r)['gate_milestones'] == []
+
+
+def test_the_floating_finish_milestone_is_check_3s_terminal():
+    # FIN floats against the Must Finish By like everything else, so nothing
+    # is critical. It is where the network finishes, so Check 3 takes it as
+    # its terminal and counts only X540's missing successor, as DCMA-14 #1
+    # does. Check 8 already anchored on it, as a finish milestone under the
+    # fallback, so Check 8 reads as before.
+    r = _fallback(gate_cstr='')
+    assert r['terminal_milestones'] == ['FIN']
+    open_ends = sorted(e['task_code'] for e in r['open_ends']['no_succ']
+                       if not e['is_terminal'])
+    dcma = r['dcma_14']['per_check']['DCMA-01-Logic']['details']['missing_succ']
+    assert open_ends == sorted(dcma) == ['X540']
+    assert _disconnected(r) == ['X540']
+    assert _continuity(r)['finish_milestones_found'] == 2
 
 
 def test_an_alap_finish_milestone_with_no_work_after_it_keeps_its_anchor():
@@ -477,8 +494,10 @@ def test_the_latest_finisher_with_logic_is_taken_as_the_end():
     # A trade-off, stated rather than hidden. S550 follows B510 and finishes
     # after the finish milestone with no successor. By position it is where
     # the network ends, so Check 8 anchors on it: no rule separates it from a
-    # real last activity without losing those. S550 floats, so Check 3 does
-    # not take it as its terminal and reports its missing successor.
+    # real last activity without losing those. Check 3 reads the end the same
+    # way, floating or not: S550 is its terminal, and FIN, the completion
+    # milestone before it, is the open end, with Check 3's note naming S550
+    # as where the network finishes, so the reader sees both ends.
     rows = _fallback_rows() + [
         _row('550', 'S550', 'Stray punch list', 'C5', 40, '2027-03-08 08:00',
              '2027-03-12 17:00', '2027-03-22 08:00', _MUST_FINISH_BY, 80),
@@ -488,9 +507,11 @@ def test_the_latest_finisher_with_logic_is_taken_as_the_end():
     assert 'S550' in _continuity(r)['completion_anchors']
     assert _disconnected(r) == ['G530', 'P520', 'X540']
     s550 = next(e for e in r['open_ends']['no_succ'] if e['task_code'] == 'S550')
-    assert s550['is_terminal'] is False
-    assert any(f['category'] == 'Open Ends' and f['affected_activity'] == 'S550'
-               for f in r['recommendations'])
+    assert s550['is_terminal'] is True
+    assert any(f['category'] == 'Open Ends' and f['affected_activity'] == 'FIN'
+               and 'no successors' in f['finding'] for f in r['recommendations'])
+    assert r['checks']['open_ends_cp']['note'].endswith(
+        "The network finishes at 'S550 - Stray punch list' (2027-03-12 17:00).")
 
 
 def test_a_self_loop_on_the_last_task_leaves_it_the_open_end():

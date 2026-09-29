@@ -49,9 +49,9 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
   because the gate itself was an anchor, and are now reported as disconnected. One
   trade-off is kept by design: the latest finisher with logic is taken as the end even
   when it is a stray dead end, because nothing separates it from a real last activity.
-  Check 3 reads the end the same way: it reports the stray's missing successor when
-  the stray floats, and otherwise reports the earlier activity with no successor and
-  names the stray as where the network finishes.
+  Check 3 reads the end the same way: the stray is its terminal, floating or not, and
+  Check 3 reports the earlier activity with no successor and names the stray as where
+  the network finishes.
 
 - **Open ends (Check 3) find the terminal by position, not task type.** Check 3 excuses
   the terminal, the critical activity with no successor where the network ends, from
@@ -85,15 +85,34 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
     sectional completion counts as a completion. An early critical finish milestone
     with no successor (MS Project conversions carry them) therefore also anchors the
     work that leads only to it, while Check 3 reports it as a critical open end.
-  - DCMA-14 #1 now excuses a finish milestone by position too (see the next entry), so
-    on the schedules above both checks count the early milestone. The two tests still
-    differ. DCMA-14 #1 excuses only a finish milestone, critical or not, and only at
-    or after the latest finish of all the work, to the minute, an activity tied to
-    nothing included. It therefore still counts any other activity that ends the
-    network, and a finish milestone that Check 3 takes as finishing with the network
-    earlier the same day, across a non-working gap, or before a later activity tied to
-    nothing. Check 3 excuses only a critical activity, so a finish milestone at the
-    finish that carries float is excused by DCMA-14 #1 and reported by Check 3.
+  - DCMA-14 #1 now excuses a finish milestone by position too (see its entry below),
+    so on the schedules above both checks count the early milestone, and both excuse
+    a completion milestone that floats at the finish (see the next entry). The two
+    tests still differ. DCMA-14 #1 excuses only a finish milestone, critical or not,
+    and only at or after the latest finish of all the work, to the minute, an activity
+    tied to nothing included. It therefore still counts any other activity that ends
+    the network, and a finish milestone that Check 3 takes as finishing with the
+    network earlier the same day, across a non-working gap, or before a later activity
+    tied to nothing.
+
+- **Open ends (Check 3) take a floating activity at the network finish as the
+  terminal.** Check 3 looked for the terminal only among the critical activities.
+  Where everything floats, because the project's Must Finish By is later than its
+  early finish and every late date is computed against it, or because the file has no
+  float written, the completion milestone was never the terminal: it drew a 'High'
+  "has no successors" finding while DCMA-14 #1 excused it as the finish milestone at
+  the network finish.
+
+  Every incomplete activity with no successor is now a candidate wherever the network
+  finish can be read. A non-critical one must be tied to at least one other work
+  activity, the rule Check 8 reads the finish by: an activity with no logic is not
+  part of the network, and Check 8 takes Check 3's terminals as anchors. It must also
+  finish with the network itself, on the same day or with no working day between. The
+  project's scheduled finish still counts for a critical activity only: for work tied
+  to other work it adds nothing but a date the file did not move with the network. A
+  file with no network finish to read looks only at critical activities, as before.
+  Where the latest finisher with logic is work after the completion milestone, that
+  work is the terminal floating or not, and the milestone is the open end.
 
 - **DCMA-14 #1 (Logic) counts the remaining work and excuses a milestone by position,
   not task type.** #1 is the share of activities missing a predecessor or a
@@ -205,6 +224,10 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
 - **Check 3's findings on critical activities with no successor** end with a sentence
   naming where the network finishes, when the file has a network finish to read, for
   example `The network finishes at 'F160 - Hand over to the owner' (2027-03-29 17:00).`
+- **Check 3's note** (`checks.open_ends_cp.note`) ends with the same sentence whenever
+  an activity is missing a successor and the file has a network finish to read. The
+  findings off the critical path keep their wording, so the sentence appears once
+  rather than on each of them.
 - **CI fetches cpp-cpm-engine at a recorded commit** (`CPM_ENGINE_PIN` in
   `.github/workflows/test.yml`) instead of its `main`, as it already pins the vendored
   parser: Check 3's working-day test calls two functions private to the engine.
@@ -217,15 +240,35 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
 - **`finish_match` in Check 3's result**: `working-day` when cpp-cpm-engine's day
   arithmetic was used to match finishes with the network, `same-day` when it was not
   available.
-- **`tests/test_logic_continuity_completion_anchor_2026_09_28.py`**, 19 tests on
+- **`tests/test_logic_continuity_completion_anchor_2026_09_28.py`**, 20 tests on
   synthetic data: the ALAP pattern, dated by hand from P6's scheduling rules, a
   dangling branch that is still reported, the gate under the every-finish-milestone
   fallback, a schedule with a real finish milestone that reads as before, what can and
   cannot be the end (an unlinked activity, a schedule with no logic, a critical gate,
   finished work, a level of effort after a milestone and a tie to one, ALAP as the
   secondary constraint, no stored early dates, a tie from the last task to itself, and
-  the trade-off above), and a chain with no early dates that ends in an ordinary task.
-  CI runs it under pytest and directly.
+  the trade-off above), a chain with no early dates that ends in an ordinary task, and
+  Check 3 taking a floating finish milestone as its terminal, as DCMA-14 #1 does. CI
+  runs it under pytest and directly.
+- **`tests/test_open_ends_floating_finish_2026_09_28.py`**, 16 tests on synthetic data,
+  a chain that floats against a Must Finish By, dated by hand from P6's scheduling
+  rules:
+  - its completion milestone is the terminal, and the early finish milestone is still
+    reported, as DCMA-14 #1 counts it;
+  - DCMA-14 #1 still counts a task and a start milestone that end the network;
+  - the note names the network finish;
+  - a stale scheduled finish, and a file with no float written;
+  - work finishing on the last day, and closing the working day before the finish,
+    is at the finish, and work a working day short is an open end;
+  - an activity tied to nothing, and one tied only to a level of effort, is not the
+    end;
+  - Check 8 anchors on every terminal, and a file with no early dates reads as
+    before;
+  - an incomplete start milestone is counted as missing a predecessor, and a complete
+    one is not.
+
+  One needs cpp-cpm-engine's `cpm` module and is skipped without it. CI runs it under
+  pytest and directly.
 - **`tests/test_open_ends_terminal_position_2026_09_28.py`**, 20 tests on synthetic
   data: the early finish milestone and the contract milestone that used to be
   excused, the working-day match on the activity's own calendar, unlinked and undated
