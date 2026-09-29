@@ -20,7 +20,7 @@ This is v0.2.0, and it is a public subset. Critical Path Partners maintains a la
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
-`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at commit [`a8edac6`](https://github.com/danafitkowski/cpp-xer-parser/commit/a8edac6f2ef19f6cddb02dee51dc320f99f6ba38), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at commit [`b5a2038`](https://github.com/danafitkowski/cpp-xer-parser/commit/b5a2038ede3fecefff1931944ba5c813cde2523d), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 ---
 
@@ -147,6 +147,14 @@ custom['name'] = 'My Custom Profile'
 custom['dcma_high_float_max_days'] = 30
 report = dcma_14_assess(data, profile=custom)  # accepts dict or string
 ```
+
+---
+
+## Blank activity calendars
+
+A schedule converted from MS Project (by MPXJ, for example) leaves `TASK.clndr_id` blank for every task without a task-level calendar. A blank id means the project calendar, and the validator reads it that way: before any check runs, each activity takes its own calendar, else the project's (`PROJECT.clndr_id`), else the calendar flagged `default_flag = 'Y'`. The parsed data is not modified.
+
+`results['calendar_resolution']` says what happened, and `results['dcma_14']['calendar_resolution']` says the same for the activities DCMA-14 assessed. It gives the count of blank ids resolved, the calendar they were resolved onto, and every activity left with no usable calendar. An activity is left without one when its id is blank and the file names no project or default calendar, or when it names a calendar the file does not declare. Such activities draw a High "Activity Calendar" recommendation and a dashboard section that lists them, because their float and duration can only be read at a flat 8 h/day.
 
 ---
 

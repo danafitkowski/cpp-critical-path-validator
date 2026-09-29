@@ -27,6 +27,8 @@ for _path in (_XER_PARSER_SCRIPTS, _CPP_COMMON_SCRIPTS, _SCRIPT_DIR):
 from xer_parser import (  # noqa: E402
     get_table,
     get_calendar_map,
+    resolve_task_calendars,
+    with_resolved_calendars,
     build_wbs_map,
     CONSTRAINT_TYPES as CONSTRAINT_LABELS,  # canonical code→label map — single source of truth
     MILESTONE_TASK_TYPES,
@@ -257,6 +259,35 @@ def _engine_date_helpers():
         return None
 
 
+def _calendar_resolution(task_cals, work_tasks):
+    """What ``xer_parser.resolve_task_calendars`` did for the activities this
+    report covers: which blank calendar ids were resolved, onto which
+    calendar and by which tier, and which activities have no usable calendar
+    at all. Every row is listed; the block is always present.
+    """
+    work_ids = {t.get('task_id', '') for t in work_tasks}
+    fell_back = [r for r in task_cals['resolved_by_fallback']
+                 if r['task_id'] in work_ids]
+    unresolved = [u for u in task_cals['unresolved'] if u['task_id'] in work_ids]
+    by_cal = {}
+    for r in fell_back:
+        key = (r['clndr_id'], r['clndr_name'], r['tier'])
+        by_cal[key] = by_cal.get(key, 0) + 1
+    return {
+        'resolved_by_fallback_count': len(fell_back),
+        'fallback_calendars': [
+            {'clndr_id': k[0], 'clndr_name': k[1], 'tier': k[2], 'task_count': v}
+            for k, v in by_cal.items()],
+        'unresolved_count': len(unresolved),
+        'unresolved': [
+            {'task_code': u['task_code'] or u['task_id'],
+             'task_name': u['task_name'],
+             'clndr_id': u['clndr_id'],
+             'reason': u['reason']}
+            for u in unresolved],
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────
 # MAIN VALIDATION FUNCTION
 # ─────────────────────────────────────────────────────────────────────
@@ -280,7 +311,19 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         activity, walking driving predecessors back to project start per
         AACE RP 49R-06, "Longest Path").
     """
-    tasks_all = get_table(data, 'TASK')
+    # Every row below carries its RESOLVED calendar: a blank TASK.clndr_id is
+    # the project calendar (PROJECT.clndr_id, else the default_flag=Y one) -
+    # MPXJ writes it blank for every MS Project task without a task calendar.
+    # A blank id found no calendar, so its float and duration (and a lag, when
+    # the other end had no calendar either) were read at 8 h/day whatever the
+    # project calendar says, and Check 3 compared its finish with the
+    # network's on no calendar at all. Resolved ONCE here so no lookup
+    # downstream can miss it: hours-to-days, Check 3's finish test, and the
+    # LPM cross-check and driver-chain float where those run. The parsed data
+    # is not modified; results['calendar_resolution'] discloses what was
+    # resolved.
+    _task_cals = resolve_task_calendars(data)
+    tasks_all = with_resolved_calendars(get_table(data, 'TASK'), _task_cals)
     preds_all = get_table(data, 'TASKPRED')
     projects = get_table(data, 'PROJECT')
     cal_map = get_calendar_map(data)
@@ -359,7 +402,40 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         'overall_score': 0,
         'overall_rating': RATING_RED,
         'overall_confidence': 'Unreliable',
+        # Blank TASK.clndr_id resolution: what resolved onto the project
+        # calendar, and what has no usable calendar at all.
+        'calendar_resolution': _calendar_resolution(_task_cals, work_tasks),
     }
+
+    _cal_res = results['calendar_resolution']
+    if _cal_res['unresolved_count']:
+        _n_unres = _cal_res['unresolved_count']
+        _n_blank = sum(1 for u in _cal_res['unresolved'] if u['reason'] == 'blank')
+        _one = _n_unres == 1
+        results['recommendations'].append({
+            'priority': 'High',
+            'category': 'Activity Calendar',
+            'finding': (
+                "%d activit%s no usable calendar: %d with a blank calendar id and "
+                "no project or default calendar in the file to fall back on, %d "
+                "naming a calendar the file does not declare. With no calendar to "
+                "read, %s float and duration are converted to days at a flat "
+                "8 h/day, and a lag on %s logic can be too. Where cpp-cpm-engine "
+                "is present, Check 3 also compares %s finish with the network's "
+                "without a working week. Checks 1, 3, 5 and 7, and DCMA-14 #6, #8 "
+                "and #13, can read %s wrongly."
+                % (_n_unres, 'y has' if _one else 'ies have',
+                   _n_blank, _n_unres - _n_blank,
+                   'its' if _one else "each one's", 'its' if _one else "each one's",
+                   'its' if _one else "each one's", 'it' if _one else 'them')),
+            'recommendation': (
+                'Assign a calendar to each listed activity in the source '
+                'schedule, or set the project calendar (PROJECT.clndr_id), then '
+                're-export. Until then, treat the float and duration readings '
+                'for these activities, and the checks built on them, as '
+                'provisional; the calendar_resolution block lists every one.'),
+            'affected_activity': _cal_res['unresolved'][0]['task_code'],
+        })
 
     # ── CHECK 1: Critical Path Identification ──────────────────────
     # Note: TF ≤ 0 reflects P6's pre-computed driving-path flag. This is the
@@ -1658,6 +1734,53 @@ def generate_dashboard(results, output_path):
     <div style="font-size:0.8rem;color:#64748b;padding:8px 12px;background:rgba(15,23,42,0.5);border-radius:4px;">{_escape(dcn_block.get('error',''))}</div>
     '''
 
+    # Activities the file gives no calendar id were scheduled on the project
+    # calendar: name it in the header, beside the readings it produced.
+    _cal_res = results.get('calendar_resolution') or {}
+    cal_basis_html = ''
+    if _cal_res.get('resolved_by_fallback_count'):
+        _tier_label = {'project': 'PROJECT.clndr_id',
+                       'default': 'default_flag=Y calendar'}
+        cal_basis_html = '<div class="meta">Calendar basis: %s</div>' % _escape(
+            'blank activity calendar ids scheduled on %s' % '; '.join(
+                "'%s' (%s, %d activit%s)" % (
+                    c['clndr_name'] or c['clndr_id'],
+                    _tier_label.get(c['tier'], c['tier']), c['task_count'],
+                    'y' if c['task_count'] == 1 else 'ies')
+                for c in _cal_res['fallback_calendars']))
+
+    # Activities with no usable calendar at all. Their float and duration
+    # were read at a flat 8 h/day, and the reader has to see that beside the
+    # checks built on them. Every one is listed, no truncation.
+    cal_unres = _cal_res.get('unresolved') or []
+    cal_html = ''
+    if cal_unres:
+        _cal_reason = {
+            'blank': 'blank calendar id; no project or default calendar in the file',
+            'undeclared': 'names a calendar the file does not declare',
+        }
+        cal_rows = ''
+        for u in cal_unres:
+            why = _cal_reason.get(u.get('reason', ''), u.get('reason', ''))
+            cal_rows += f'''
+        <tr>
+            <td>{_escape(u.get('task_code', ''))}</td>
+            <td>{_escape(u.get('task_name', ''))}</td>
+            <td>{_escape(u.get('clndr_id', '') or '(blank)')}</td>
+            <td>{_escape(why)}</td>
+        </tr>'''
+        cal_html = f'''
+    <!-- Activities Without a Usable Calendar -->
+    <div class="section-title">Activities Without a Usable Calendar ({len(cal_unres)})</div>
+    <div class="cal-note">The activities listed below have no usable calendar. With no calendar to read, their float and duration are converted to days at a flat 8 h/day, and a lag on their logic can be too. Where cpp-cpm-engine is present, Check 3 also compares their finish with the network&#39;s without a working week. Checks 1, 3, 5 and 7, and DCMA-14 #6, #8 and #13, can read them wrongly. Assign calendars in the source schedule, or set the project calendar, and re-export.</div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Code</th><th>Activity Name</th><th>Calendar ID</th><th>Why</th></tr></thead>
+            <tbody>{cal_rows}</tbody>
+        </table>
+    </div>
+    '''
+
     # Gauge SVG
     score = results['overall_score']
     gauge_color = _rating_color(results['overall_rating'])
@@ -1731,6 +1854,9 @@ def generate_dashboard(results, output_path):
     .stat-value {{ font-size: 1.4rem; font-weight: 700; color: #f1f5f9; }}
     .stat-label {{ font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }}
 
+    /* Activity calendar note */
+    .cal-note {{ background: rgba(245,158,11,0.12); border-left: 4px solid #f59e0b; color: #e2e8f0; padding: 10px 14px; border-radius: 6px; font-size: 0.8rem; margin-bottom: 12px; }}
+
     /* Print */
     @media print {{
         body {{ background: #fff; color: #1e293b; padding: 12px; }}
@@ -1738,6 +1864,7 @@ def generate_dashboard(results, output_path):
         th {{ background: #f1f5f9; color: #475569; }}
         td {{ border-bottom-color: #e2e8f0; color: #334155; }}
         .stats-bar {{ background: #f8fafc; }}
+        .cal-note {{ background: #fef3c7; color: #1e293b; }}
     }}
 </style>
 </head>
@@ -1751,6 +1878,7 @@ def generate_dashboard(results, output_path):
         <div class="header-right">
             <div class="meta">Data Date: {_escape(results['data_date']) if results['data_date'] else '(not set)'}</div>
             <div class="meta">Analyzed: {_escape(results['analysis_timestamp'])}</div>
+            {cal_basis_html}
         </div>
     </div>
 
@@ -1764,6 +1892,8 @@ def generate_dashboard(results, output_path):
         <div class="stat"><div class="stat-value">{len(results['near_critical_activities'])}</div><div class="stat-label">Near-Critical</div></div>
         <div class="stat"><div class="stat-value">{len(results['recommendations'])}</div><div class="stat-label">Recommendations</div></div>
     </div>
+
+    {cal_html}
 
     <!-- Gauge -->
     <div class="gauge-container">
