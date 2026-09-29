@@ -36,7 +36,7 @@ jobs:
       - name: Install pytest
         run: python -m pip install --upgrade pip pytest
 
-      - name: Fetch cpp-cpm-engine at its pin (Check 2 LPM cross-check, Check 3 working-day test)
+      - name: Fetch cpp-cpm-engine at its pin (Check 3 working-day test)
         shell: bash
         run: |
           git init -q "$RUNNER_TEMP/cpp-cpm-engine"
@@ -65,6 +65,7 @@ jobs:
           python tests/test_open_ends_floating_finish_2026_09_28.py
           python tests/test_dcma14_guards.py
           python tests/test_blank_task_calendar_2026_09_29.py
+          python tests/test_readme_examples.py
 
       # The vendored parser is checked against a PINNED upstream commit rather
       # than against `main`, and the hard check is offline.

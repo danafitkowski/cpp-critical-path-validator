@@ -87,8 +87,8 @@ results = validate_critical_path(data)
 generate_dashboard(results, 'cp_validation_report.html')
 
 # Or interrogate the results dict directly
-print(f"CP Confidence Score: {results['cp_confidence_score']}/100")
-print(f"CP Confidence Band:  {results['cp_confidence_band']}")
+print(f"CP Confidence Score: {results['overall_score']}/100")
+print(f"CP Confidence Band:  {results['overall_confidence']} ({results['overall_rating']})")
 
 for check_name, check_data in results['checks'].items():
     print(f"  {check_name}: {check_data['rating']} — {check_data['note']}")
@@ -137,16 +137,21 @@ Three profiles bundle out of the box:
 | `nuclear`    | Tightened thresholds for nuclear / heavy energy     |
 | `mining`     | Relaxed thresholds for resource-driven mining work  |
 
-Clone and mutate the dict to add your own:
+`dcma_14_assess` takes one of these names. It does not take a threshold dict: the
+bundled `config_profiles.get_profile` looks the profile up by name, and a dict raises
+`TypeError`. `get_profile` returns a copy of a profile's thresholds for reading:
 
 ```python
-from config_profiles import get_profile
+from config_profiles import get_profile, list_profiles
 
-custom = get_profile('commercial')
-custom['name'] = 'My Custom Profile'
-custom['dcma_high_float_max_days'] = 30
-report = dcma_14_assess(data, profile=custom)  # accepts dict or string
+print(list_profiles())    # the profile names dcma_14_assess takes
+print(get_profile('nuclear')['dcma_high_duration_max_days'])
+report = dcma_14_assess(data, profile='nuclear')
 ```
+
+To grade against other thresholds, add a profile to `_PROFILES` in
+`scripts/config_profiles.py`, with every key the bundled profiles have, and pass its
+name.
 
 ---
 
@@ -163,11 +168,20 @@ A schedule converted from MS Project (by MPXJ, for example) leaves `TASK.clndr_i
 ```python
 from dcma14 import trace_driving_path
 
-# Walk the driving-predecessor chain for a CP activity back to project start
+# Walk back from an activity through its driving predecessors
 chain = trace_driving_path(data, task_code='A1050.20')
-for step in chain:
-    print(f"  {step['task_code']}  TF={step['total_float_days']}  drives via {step['rel_type']}")
+print(' -> '.join(chain))
 ```
+
+`trace_driving_path` returns a list of activity codes: the earliest driver it reached
+first and the activity you named last, or an empty list when the file has no activity
+with that code. At each step it follows the relationship marked driving (`driving` or
+`driving_path_flag` set to `Y` on the TASKPRED row) and, where none is, the predecessor
+that finishes latest, whatever the relationship type or lag. It stops after the first
+predecessor that is complete or finishes before the data date; where it finds no
+predecessor to follow (none left, none with a finish date, or one already in the
+chain); and after 200 predecessors, so a longer chain comes back without its earliest
+part. It returns codes only, with no float or relationship type.
 
 ---
 
@@ -202,14 +216,17 @@ Weighted average across all 9 checks (weights sum to 1.00):
 | Out-of-sequence                       |   5%   |
 | Constraint saturation (schedule-wide) |   5%   |
 
-Score bands:
+Score bands. `validate_critical_path` returns the score as `results['overall_score']`,
+rounded to one decimal, the band as `results['overall_confidence']` and its colour as
+`results['overall_rating']`. The band is set on the unrounded score, so a score that
+rounds up to a band's lower edge stays in the band below it.
 
-| Score    | Band                  | Meaning                                                          |
-|----------|-----------------------|------------------------------------------------------------------|
-|  80–100  | High confidence       | CP is logic-driven and reliable.                                 |
-|  60–79   | Moderate confidence   | CP has issues but is directionally correct.                      |
-|  40–59   | Low confidence        | CP needs significant corrections.                                |
-|   0–39   | Unreliable            | CP is artificial; do not rely on it for planning.                |
+| Score          | `overall_confidence`  | `overall_rating` | Meaning                                            |
+|----------------|-----------------------|------------------|----------------------------------------------------|
+| 80 or more     | `High Confidence`     | `GREEN`          | CP is logic-driven and reliable.                   |
+| 60 to under 80 | `Moderate Confidence` | `AMBER`          | CP has issues but is directionally correct.        |
+| 40 to under 60 | `Low Confidence`      | `AMBER`          | CP needs significant corrections.                  |
+| under 40       | `Unreliable`          | `RED`            | CP is artificial; do not rely on it for planning.  |
 
 ---
 
@@ -254,11 +271,14 @@ All tests build their XER fixtures synthetically in memory; no real client XER f
 
 ## Integration with the CPP forensic suite
 
-CP validation is the first thing Critical Path Partners runs on a new XER, checking whether the CP is real before any forensic delay analysis, time impact analysis, or claims-package work begins. That job is done by the internal validator described under [Scope and status](#scope-and-status); this repository publishes its nine-check core so anyone can run the same audit.
+CP validation is the first thing Critical Path Partners runs on a new XER, checking whether the CP is real before any forensic delay analysis, time impact analysis, or claims-package work begins. That job is done by the internal validator described under [Scope and status](#scope-and-status); this repository publishes its nine-check core so anyone can run the same checks, without the two outputs described below.
 
-When `cpp-cpm-engine` is on the same `sys.path`, the validator's Check 2 also runs an LPM-confirmed-false-CP detection that cross-validates the schedule's reported critical path against an independently-computed LPM result, and Check 3 uses the engine's working-day arithmetic to decide which activities finish with the network: a finish at one working day's close and one at the next working day's opening count as the same instant on the activity's calendar.
+When `cpp-cpm-engine` is on the same `sys.path` (its `python_reference/` folder), Check 3 uses the engine's working-day arithmetic to decide which activities finish with the network: a finish at one working day's close and one at the next working day's opening count as the same instant on the activity's calendar. Without the engine, Check 3 matches finishes by day only. `checks.open_ends_cp.finish_match` says which of the two Check 3 ran (`working-day` or `same-day`). CI runs against the engine commit recorded as `CPM_ENGINE_PIN` in `.github/workflows/test.yml`. Check 3's finish test is the only thing in the validator that uses the public engine.
 
-When the engine is not available, the validator gracefully degrades: Check 2 still runs the constraint-driven analysis and skips the LPM cross-check, and Check 3 matches finishes by day only. `checks.open_ends_cp.finish_match` says which of the two Check 3 ran (`working-day` or `same-day`). CI runs against the engine commit recorded as `CPM_ENGINE_PIN` in `.github/workflows/test.yml`.
+Two outputs need code that neither this repository nor the public engine provides, so they do not run from a clone of this repository, with the public engine or without it:
+
+- **Check 2's LPM cross-check**, which compares the critical path the schedule reports with an independently computed longest path, needs a `compute_lpm` function in the engine's `cpm` module. The public engine's `python_reference/cpm.py` does not have one; its header says it was stripped. Check 2 still runs its constraint-driven analysis, `checks.constraint_driven.lpm_confirmed_false_cp` stays empty, and `checks.constraint_driven.lpm_error` gives the reason: with the public engine it begins "cannot import name 'compute_lpm' from 'cpm'", and without the engine it reads "No module named 'cpm'".
+- **The driver-chain narrative** needs a `driver_chain_narrative` module, which this repository does not ship. `results['driver_chain_narrative']` is an error block instead (an `error` naming the missing module, with empty `narratives` and `manifest`), and the dashboard's Driver-Chain Narratives section shows that error where the narratives would be.
 
 ---
 
