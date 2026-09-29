@@ -24,6 +24,10 @@ milestone always needs a predecessor. The missing-predecessor and
 missing-successor counts are reported separately; the graded value is still
 their union, the rate the threshold is stated against.
 
+Four tests are mutation guards rather than defect fixes: each pins a rule of
+the check that every other test still passed without, and names the mutant
+it kills.
+
 The fixture is synthetic: a start milestone, two five-day activities and a
 finish milestone, tied finish to start on a five-day calendar.
 """
@@ -221,6 +225,147 @@ def test_finish_milestone_requires_predecessor():
     assert logic['severity'] != 'PASS', (
         'DCMA #1 must not PASS while a finish milestone dangles; got %s'
         % logic['severity'])
+
+
+def test_logic_takes_the_network_start_from_all_the_work():
+    """The network starts where the first activity started, completed work
+    included, not where the remaining work starts.
+
+    MUTANT (2026-09-29): taking the start anchor over the incomplete activities
+    alone passed every other test. It excuses a start milestone with no
+    predecessor that opens the REMAINING work, as if it started the project.
+    Here the project started in March, and a milestone that resumes the work
+    has no predecessor: it must be counted.
+
+    The finish anchor is taken over the same set, but on a schedule
+    rescheduled to its data date no completed activity finishes after the
+    remaining work, so no sound fixture tells the two apart there.
+    """
+    tasks, preds = _chain()
+    for t in tasks:
+        if t['task_code'] == 'A00':
+            t['status_code'] = 'TK_Complete'
+            t['target_start_date'] = t['target_end_date'] = '2026-03-02 08:00'
+            t['early_start_date'] = t['early_end_date'] = '2026-03-02 08:00'
+            t['act_start_date'] = t['act_end_date'] = '2026-03-02 08:00'
+    # Opens the remaining work, tied forward only.
+    tasks.append(_task('TR', 'R00', 'Resume works', 'TT_Mile', tf='0',
+                       start='2026-04-27 08:00', end='2026-04-27 08:00',
+                       remain='0', target='0'))
+    preds.append({'task_id': 'T1', 'pred_task_id': 'TR',
+                  'pred_type': 'PR_FS', 'lag_hr_cnt': '0'})
+    result = dcma_14_assess(_schedule(tasks, preds), profile='commercial')
+    det = result['per_check']['DCMA-01-Logic']['details']
+    assert det['missing_pred'] == ['R00'], (
+        f'the network started in March, so a start milestone that opens the '
+        f'remaining work with no predecessor is a dangling start; '
+        f'missing_pred={det["missing_pred"]}')
+
+
+def test_logic_does_not_excuse_a_milestone_it_cannot_place():
+    """A milestone the file gives no date is not excused on either side.
+
+    MUTANT (2026-09-29): both exemptions need a date, but reading a missing
+    date as at the network's start or finish passed every other test. That
+    excuses exactly the milestones whose position cannot be read. Here a start
+    milestone and a finish milestone carry no dates at all, each tied on one
+    side only: each must be counted on the other.
+    """
+    tasks, preds = _chain()
+    tasks.append(_task('TU', 'U10', 'Undated start', 'TT_Mile', tf='0',
+                       start='', end='', remain='0', target='0'))
+    tasks.append(_task('TV', 'U20', 'Undated finish', 'TT_FinMile', tf='0',
+                       start='', end='', remain='0', target='0'))
+    preds.append({'task_id': 'T1', 'pred_task_id': 'TU',
+                  'pred_type': 'PR_FS', 'lag_hr_cnt': '0'})   # a successor only
+    preds.append({'task_id': 'TV', 'pred_task_id': 'T2',
+                  'pred_type': 'PR_FS', 'lag_hr_cnt': '0'})   # a predecessor only
+    result = dcma_14_assess(_schedule(tasks, preds), profile='commercial')
+    det = result['per_check']['DCMA-01-Logic']['details']
+    assert det['missing_pred'] == ['U10'], det
+    assert det['missing_succ'] == ['U20'], det
+
+
+def test_logic_counts_an_activity_missing_both_once():
+    """An activity with neither a predecessor nor a successor is one activity
+    missing logic, not two.
+
+    MUTANT (2026-09-29): in every other test each activity misses one side
+    only, so adding the two lists together instead of taking their union
+    passed, and an orphan would count twice against the threshold.
+    """
+    tasks, preds = _chain()
+    tasks.append(_task('TO', 'O10', 'Orphan', start='2026-05-04 08:00',
+                       end='2026-05-05 16:00'))
+    check = dcma_14_assess(_schedule(tasks, preds),
+                           profile='commercial')['per_check']['DCMA-01-Logic']
+    det = check['details']
+    assert det['missing_pred'] == det['missing_succ'] == ['O10'], det
+    assert (det['missing_count'], det['examples']) == (1, ['O10']), det
+    assert check['value'] == 20.0, (
+        f'one of the five incomplete activities is missing logic, 20%; got '
+        f'{check["value"]}')
+
+
+def test_logic_places_completed_work_by_its_actual_dates():
+    """Completed work is placed by its actual dates, not by the early dates a
+    P6 export stamps on it.
+
+    MUTANT (2026-09-29): reading the early start before the actual start passed
+    every other test. A P6 export stamps a completed activity's early dates at
+    the data date, so the network would seem to start there, and a start
+    milestone at the data date with no predecessor would be excused. Here the
+    start milestone was finished in March: the network starts there.
+
+    _task_finish reads in the same order, but a completed activity's stamp and
+    its actual finish both fall at or before the data date, and the remaining
+    work finishes after it, so no sound fixture tells the two apart there.
+    """
+    data_date = '2026-04-27 08:00'
+    tasks, preds = _chain()
+    for t in tasks:
+        if t['task_code'] == 'A00':
+            t['status_code'] = 'TK_Complete'
+            t['act_start_date'] = t['act_end_date'] = '2026-03-02 08:00'
+            t['target_start_date'] = t['target_end_date'] = '2026-03-02 08:00'
+            t['early_start_date'] = t['early_end_date'] = data_date
+    tasks.append(_task('TR', 'R00', 'Resume works', 'TT_Mile', tf='0',
+                       start=data_date, end=data_date, remain='0', target='0'))
+    preds.append({'task_id': 'T1', 'pred_task_id': 'TR',
+                  'pred_type': 'PR_FS', 'lag_hr_cnt': '0'})
+    result = dcma_14_assess(_schedule(tasks, preds, data_date=data_date),
+                            profile='commercial')
+    det = result['per_check']['DCMA-01-Logic']['details']
+    assert det['missing_pred'] == ['R00'], (
+        f'the start milestone finished in March, so the milestone that resumes '
+        f'the work at the data date is a dangling start; '
+        f'missing_pred={det["missing_pred"]}')
+
+
+def test_logic_details_carry_every_key_when_no_work_is_incomplete():
+    """A schedule with no incomplete work passes with the same details as any
+    other: every count and rate at zero and both lists empty.
+
+    DEFECT (2026-09-29): the vacuous pass returned the counts only, so a caller
+    reading `missing_pred` or `missing_succ` on a finished as-built schedule
+    got a KeyError.
+    """
+    tasks, preds = _chain()
+    usual = set(dcma_14_assess(_schedule(tasks, preds), profile='commercial')
+                ['per_check']['DCMA-01-Logic']['details'])
+    for t in tasks:
+        t['status_code'] = 'TK_Complete'
+        t['act_start_date'] = t['early_start_date']
+        t['act_end_date'] = t['early_end_date']
+        t['remain_drtn_hr_cnt'] = '0'
+    check = dcma_14_assess(_schedule(tasks, preds, data_date='2026-05-12 00:00'),
+                           profile='commercial')['per_check']['DCMA-01-Logic']
+    det = check['details']
+    assert (check['severity'], check['value']) == ('PASS', 0.0), check
+    assert set(det) == usual, f'missing keys: {sorted(usual - set(det))}'
+    assert det['missing_pred'] == det['missing_succ'] == det['examples'] == []
+    assert (det['missing_count'], det['denominator']) == (0, 0), det
+    assert det['missing_pred_pct'] == det['missing_succ_pct'] == 0.0, det
 
 
 if __name__ == '__main__':
