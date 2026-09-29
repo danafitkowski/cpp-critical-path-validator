@@ -48,7 +48,7 @@ We will credit reporters in the release notes unless you ask to remain anonymous
 - **Performance degradation that does not affect correctness.** "It got 12% slower on a 50,000-activity XER" is not a security issue. Open a normal performance bug.
 - **Style / lint issues.** Including pyflakes, black, and "best practice" complaints.
 - **Citations that "could be worded better."** Citation defects are handled through the regular issue template, not the security channel. Wrong, mis-attributed, or fabricated citations *are* release-blocking, but they are not security vulnerabilities.
-- **The optional LPM cross-check unavailable when `cpm` module is absent.** The validator gracefully degrades; the no-engine path is the documented behavior, not a security issue.
+- **The LPM cross-check not running.** Check 2's LPM cross-check needs a `compute_lpm` function that neither this repository nor the public `cpp-cpm-engine` provides, so it does not run from a clone of this repository, with the engine or without it. The README documents this; it is not a security issue.
 - **Theoretical attacks** with no demonstrated reproduction against a current release.
 
 ---
@@ -85,9 +85,9 @@ In scope:
 Out of scope:
 
 - Third-party clones, forks, or re-distributions
-- The optional LPM cross-check feature when `cpm` module from `cpp-cpm-engine` is not on `sys.path` — this is documented graceful-degradation behavior
+- The LPM cross-check, which needs a `compute_lpm` function that neither this repository nor the public `cpp-cpm-engine` provides; the README documents that it does not run from this repository
 - The closed CPP forensic skill suite — these have their own security channel; email `hello@criticalpathpartners.ca` and we will route.
 
 ---
 
-*Last updated: 2026-09-02.*
+*Last updated: 2026-09-29.*

@@ -14,11 +14,16 @@ Three profiles ship out of the box:
   - `mining`     — slightly relaxed thresholds for resource-driven mining
                     schedules where some DCMA assumptions don't translate
 
-External users can clone any profile dict, mutate, and pass it directly to
-the validator (e.g. via the `profile` parameter on `dcma_14_assess`).
+Callers pass a profile by name (e.g. the `profile` parameter on
+`dcma_14_assess`). `get_profile` looks the name up in `_PROFILES`, so an
+unknown name raises ValueError and a dict raises TypeError. It returns a copy,
+which callers may read or change without affecting the registry. To run other
+thresholds, add an entry to `_PROFILES` with every key the bundled profiles
+carry, and pass its name.
 
-The threshold keys are documented in the dcma14.py header — each `_check_NN_*`
-function reads one or two keys from the profile dict by name.
+The keys of the commercial profile below are commented with the DCMA 14-Point
+criterion each one sets, in the published numbering; the `_check_NN_*`
+functions in dcma14.py read them by name.
 """
 
 from typing import Dict
@@ -45,7 +50,7 @@ _COMMERCIAL: Dict[str, object] = {
     'dcma_resources_min_pct':           80.0,  # #10 Resources
     'dcma_missed_tasks_max_pct':        5.0,   # #11 Missed Tasks
     'dcma_cpli_min':                    0.95,  # #13 CPLI
-    'bei_min':                          0.95,  # BEI extension
+    'bei_min':                          0.95,  # #14 BEI
 }
 
 _NUCLEAR: Dict[str, object] = {

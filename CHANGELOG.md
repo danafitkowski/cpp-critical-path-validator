@@ -52,6 +52,24 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
   section also says where the walk stops, including its 200-predecessor cap, and the
   score bands say the band is set before the score is rounded. No validator code
   changed.
+- **The same claims are corrected outside the README.** SECURITY.md said the LPM
+  cross-check is unavailable only when the `cpm` module is absent. It needs
+  `compute_lpm`, which the public engine does not have, so from this repository it
+  does not run with the engine either, and both places in the policy now say so. The
+  `validate_critical_path` docstring promised one driver-chain narrative per critical
+  activity; it now says when the block holds narratives, and that from this
+  repository it is an error block. The `_engine_date_helpers` docstring no longer
+  points to the LPM cross-check. The docstring and skip message of
+  `test_lpm_confirmed_false_cp_in_check2` no longer call the cross-check "documented
+  as optional" or say CI proves its wiring. `scripts/config_profiles.py` said a
+  caller could pass a profile dict to `dcma_14_assess`, which raises `TypeError`, and
+  that the threshold keys are documented in the dcma14.py header, which names none.
+  It now says a profile is passed by name and how to add one, and its BEI comment
+  reads #14, as `dcma14` scores it. The file is identical to `cpp-xer-parser`'s copy
+  again, which took the same text at
+  [`bdc6699`](https://github.com/danafitkowski/cpp-xer-parser/commit/bdc66995826c82dc1691977cdf40b8219a8eaea9).
+  Docstrings, comments and one skip message only; the scripts' code is unchanged
+  apart from docstrings.
 
 ### Added
 

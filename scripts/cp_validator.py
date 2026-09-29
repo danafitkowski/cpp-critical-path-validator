@@ -242,8 +242,8 @@ def _finishes_with(task, finish, cal_map, helpers):
 
 def _engine_date_helpers():
     """The engine's day arithmetic for _finishes_with, from cpp-cpm-engine's
-    `cpm` module when it is on the path (as Check 2's LPM cross-check takes
-    it), or None when it is not: callers then compare days only.
+    `cpm` module when it is on the path, or None when it is not: callers then
+    compare days only.
 
     The two functions are private to the engine, so they are called once here
     the way _finishes_with calls them. An engine without them, or with other
@@ -302,14 +302,19 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         project_index: Which project to analyze (0 = first/primary)
         profile: DCMA threshold profile — 'commercial' (default), 'nuclear', 'mining'
         baseline_data: Optional parsed XER baseline (for DCMA BEI computation)
-        jurisdiction: passed through to driver_chain_narrative manifest
+        jurisdiction: passed through to the driver-chain narrative's manifest
             ('US-FED' / 'US-CA' / 'UK' / 'ON' / etc.). Default 'US-FED'.
+            Unused unless the narrative runs (see Returns).
 
     Returns:
         dict with all findings, scores, recommendations, a `dcma_14` block,
-        and a `driver_chain_narrative` block (one narrative per critical
-        activity, walking driving predecessors back to project start per
-        AACE RP 49R-06, "Longest Path").
+        and a `driver_chain_narrative` block. Where a `driver_chain_narrative`
+        module and cpp-cpm-engine's `compute_cpm` are on the path, the block
+        holds one narrative per critical activity, walking driving
+        predecessors back to project start per AACE RP 49R-06,
+        "Longest Path". This repository does not ship that module, so from a
+        clone of it the block is an error: `error`, with empty `narratives`
+        and `manifest`.
     """
     # Every row below carries its RESOLVED calendar: a blank TASK.clndr_id is
     # the project calendar (PROJECT.clndr_id, else the default_flag=Y one) -
