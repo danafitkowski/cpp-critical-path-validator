@@ -388,9 +388,10 @@ def test_lpm_confirmed_false_cp_in_check2():
       - All activities get total_float_hr_cnt=0 so TFM flags all.
       - LPM will flag B, C, D on the longest path (80h total) but NOT A (0h branch).
 
-    Skip condition: the LPM cross-check requires `compute_lpm` from the
-    sibling `cpp-cpm-engine` package. The README documents it as optional —
-    the validator gracefully degrades when the engine is unavailable.
+    Skip condition: the LPM cross-check needs a `compute_lpm` in the engine's
+    `cpm` module, which the public `cpp-cpm-engine` does not have. The README
+    says so: without it, Check 2 runs its constraint-driven analysis only and
+    `lpm_error` records the failed import.
 
     On stand-alone OSS CI, the engine repo IS cloned and `cpm` imports, but
     the OSS `python_reference/cpm.py` is an explicitly-stripped subset (per
@@ -407,11 +408,10 @@ def test_lpm_confirmed_false_cp_in_check2():
         import pytest as _pytest
         _pytest.skip(
             "cpp-cpm-engine's OSS python_reference does not expose "
-            "compute_lpm — LPM cross-check is documented as optional. "
-            "The validator's CI clones the engine and proves the wiring "
-            "compiles; the full LPM-confirmation contract is exercised "
-            "inside the CPP internal _deploy tree where compute_lpm "
-            "is bundled."
+            "compute_lpm, so the LPM cross-check does not run from this "
+            "repository, as the README says. The full LPM-confirmation "
+            "contract is exercised inside the CPP internal _deploy tree "
+            "where compute_lpm is bundled."
         )
     tasks = [
         # task_id, task_code, task_name, proj_id, wbs_id, clndr_id,
