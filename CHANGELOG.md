@@ -7,8 +7,8 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 ## Unreleased
 
 Changes on `main` since the v0.1.0 tag: corrections to the build, to public claims,
-to the bundled parser's output, and to how Checks 3 and 8 find where the project
-finishes. No check has been added.
+to the bundled parser's output, to how Checks 3 and 8 find where the project
+finishes, and to what DCMA-14 #1 counts. No check has been added.
 
 ### Fixed
 
@@ -85,10 +85,40 @@ finishes. No check has been added.
     sectional completion counts as a completion. An early critical finish milestone
     with no successor (MS Project conversions carry them) therefore also anchors the
     work that leads only to it, while Check 3 reports it as a critical open end.
-  - DCMA-14 #1 in this repository still exempts every finish milestone from its
-    missing-successor count, whatever its date. Check 3 and DCMA-14 #1 can therefore
-    name different activities: where the finish milestone comes before the activity
-    that ends the network, Check 3 reports the milestone and DCMA-14 #1 the activity.
+  - DCMA-14 #1 now excuses a finish milestone by position too (see the next entry), so
+    on the schedules above both checks count the early milestone. The two tests still
+    differ. DCMA-14 #1 excuses only a finish milestone, critical or not, and only at
+    or after the latest finish of all the work, to the minute, an activity tied to
+    nothing included. It therefore still counts any other activity that ends the
+    network, and a finish milestone that Check 3 takes as finishing with the network
+    earlier the same day, across a non-working gap, or before a later activity tied to
+    nothing. Check 3 excuses only a critical activity, so a finish milestone at the
+    finish that carries float is excused by DCMA-14 #1 and reported by Check 3.
+
+- **DCMA-14 #1 (Logic) counts the remaining work and excuses a milestone by position,
+  not task type.** #1 is the share of activities missing a predecessor or a
+  successor. It ran over every work activity, completed ones included, so on an
+  update well into a job the finished work, whose logic no longer drives anything,
+  diluted the percentage. It also excused milestones by type: every start milestone
+  from needing a predecessor, and every finish milestone from needing a successor or
+  a predecessor, whatever its date. A milestone in the middle of the network that
+  leads from nothing, or to nothing, is the dangling logic #1 exists to find, and a
+  finish milestone tied to nothing at all was never counted.
+
+  #1 now counts incomplete activities only, as #6, #7 and #8 already did. A start
+  milestone with no predecessor is excused only at or before the earliest start of
+  all the work, and a finish milestone with no successor only at or after the latest
+  finish of all the work, completed work included in both. Each activity is placed by
+  its actual date, else its early date, else its planned date, and one with no date
+  is not excused. A finish milestone always needs a predecessor. The check's details
+  now list the activities missing a predecessor and those missing a successor
+  separately (`missing_pred`, `missing_succ`), with their counts, their rates and the
+  `denominator`, and its message gives both counts. A schedule with no incomplete
+  work passes with the counts at zero, and its details then carry neither the two
+  lists nor the rates. `missing_count` and `examples` still hold the union, and the
+  union rate is still the value graded against the threshold. On a progressed
+  schedule the rate can move either way: completed activities no longer count, and
+  the remaining work is the whole denominator.
 
 - **CI is green again.** The last four runs (2026-05-16, 2026-08-19, 2026-08-22 and
   2026-08-23) each failed on exactly one step, the `xer_parser.py` drift check, in
@@ -196,14 +226,15 @@ finishes. No check has been added.
   secondary constraint, no stored early dates, a tie from the last task to itself, and
   the trade-off above), and a chain with no early dates that ends in an ordinary task.
   CI runs it under pytest and directly.
-- **`tests/test_open_ends_terminal_position_2026_09_28.py`**, 19 tests on synthetic
+- **`tests/test_open_ends_terminal_position_2026_09_28.py`**, 20 tests on synthetic
   data: the early finish milestone and the contract milestone that used to be
   excused, the working-day match on the activity's own calendar, unlinked and undated
   activities, the finding text, the trade-off, a real finish milestone and a file with
   no early dates that read as before, Check 8 not anchoring on a start milestone that
-  leads nowhere, an engine without the day arithmetic leaving the same-day test, and
-  `finish_match`. Two need cpp-cpm-engine's `cpm` module and are skipped without it.
-  CI runs it under pytest and directly.
+  leads nowhere, DCMA-14 #1 excusing the same finish milestone as Check 3, an engine
+  without the day arithmetic leaving the same-day test, and `finish_match`. Two need
+  cpp-cpm-engine's `cpm` module and are skipped without it. CI runs it under pytest
+  and directly.
 - **`tests/test_bundled_validation_runs.py`**, 3 tests on synthetic data, after
   upstream's test of the same name: the bundled `validation.py` and
   `config_profiles.py` bind, and are the copies in `scripts/`; `validate_schedule`
@@ -211,6 +242,12 @@ finishes. No check has been added.
   `aace_31r_compliance` scores 100 less 20 per BLOCK finding and 5 per WARN finding,
   on that schedule and on one whose WBS is too shallow, which draws a BLOCK. The last
   test fails on the previous `validation.py`. CI runs it under pytest and directly.
+- **`tests/test_dcma14_logic.py`**, 4 tests on synthetic data for DCMA-14 #1: completed
+  work left out of the denominator, a start milestone in the middle of the network
+  counted while the one that starts it is excused, the missing-predecessor and
+  missing-successor counts reported separately, and a finish milestone with no
+  predecessor counted. Each fails on the previous check. CI runs it under pytest and
+  directly.
 - **A "Scope and status" section in the README**, recording that this is a public
   subset of a larger internal validator and recording the vendored parser's exact
   provenance.

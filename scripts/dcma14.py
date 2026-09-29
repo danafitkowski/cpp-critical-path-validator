@@ -8,7 +8,7 @@ review.
 
 The DCMA 14 checks, as implemented here:
 
-    1. Logic          — % activities missing predecessor or successor
+    1. Logic          — % incomplete activities missing predecessor or successor
     2. Leads          — count of negative lag_hr_cnt relationships
     3. Lags           — % of relationships with positive lag
     4. Relationship   — % Finish-to-Start (FS) relationships
@@ -114,42 +114,98 @@ def _pct_complete(t):
     return 0.0
 
 
+def _task_start(t):
+    """Best available start instant: actual, else early, else planned."""
+    return (_parse_date(t.get('act_start_date', ''))
+            or _parse_date(t.get('early_start_date', ''))
+            or _parse_date(t.get('target_start_date', '')))
+
+
+def _task_finish(t):
+    """Best available finish instant: actual, else early, else planned."""
+    return (_parse_date(t.get('act_end_date', ''))
+            or _parse_date(t.get('early_end_date', ''))
+            or _parse_date(t.get('target_end_date', '')))
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Per-check implementations
 # Each returns (severity, value, threshold, message, details_dict)
 # ─────────────────────────────────────────────────────────────────────
 
-def _check_01_logic(work_tasks, pred_map, succ_map, profile):
-    """#1 Logic — % of work activities missing predecessor or successor.
+def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile):
+    """#1 Logic — % of INCOMPLETE activities missing a predecessor or successor.
 
-    Following the standard DCMA interpretation: start milestones (TT_Mile) are
-    allowed to have no predecessor, and finish milestones (TT_FinMile) are
-    allowed to have no successor. Both are legitimate anchors.
+    Two corrections against the previous implementation:
+
+    • Population. The DCMA metric family is scoped to incomplete work; this
+      check used to run over every work task, completed ones included. On an
+      update well into a job that put the completed work in the denominator
+      beside the remaining work, diluting the percentage with historic work
+      whose logic no longer drives anything.
+
+    • Milestone exemption by POSITION, not by task_type. A start milestone may
+      legitimately have no predecessor only where it IS the start of the
+      network; a finish milestone may legitimately have no successor only where
+      it IS the end. Exempting every TT_Mile / TT_FinMile by type exempted
+      milestones in the middle of the network that lead from nothing or to
+      nothing — the dangling starts and ends this test exists to find. Every
+      TT_FinMile was also exempted from the predecessor test, so one tied to
+      nothing at all was never counted; it now needs a predecessor like any
+      other activity.
+
+    Both the missing-predecessor and the missing-successor rates are reported
+    separately in the details; the graded value stays the union rate, which is
+    the quantity the published ≤5% is stated against.
     """
     threshold = profile['dcma_logic_max_missing_pct']
-    if not work_tasks:
-        return PASS, 0.0, threshold, 'No work tasks (vacuous pass).', {'missing_count': 0}
-    missing = []
-    for t in work_tasks:
+    if not incomplete:
+        return PASS, 0.0, threshold, 'No incomplete work tasks (vacuous pass).', {
+            'missing_count': 0, 'missing_pred_count': 0, 'missing_succ_count': 0,
+            'denominator': 0, 'examples': [],
+        }
+    # Network anchors are taken over the WHOLE work set (completed activities
+    # included) — the network starts where the first activity started, not
+    # where the remaining work starts.
+    starts = [d for d in (_task_start(t) for t in work_tasks) if d]
+    finishes = [d for d in (_task_finish(t) for t in work_tasks) if d]
+    net_start = min(starts) if starts else None
+    net_finish = max(finishes) if finishes else None
+
+    missing_pred, missing_succ = [], []
+    for t in incomplete:
         tid = t['task_id']
         ttype = t.get('task_type', '')
-        needs_pred = ttype != 'TT_FinMile'     # finish milestones can start-anchor
-        needs_succ = ttype != 'TT_FinMile'     # finish milestones legitimately have no successor
-        # TT_Mile (start milestone) should have a successor but may lack a predecessor
-        if ttype == 'TT_Mile':
-            needs_pred = False
-            needs_succ = True
-        missing_pred = needs_pred and tid not in pred_map
-        missing_succ = needs_succ and tid not in succ_map
-        if missing_pred or missing_succ:
-            missing.append(t.get('task_code', tid))
-    pct = len(missing) / len(work_tasks) * 100.0
+        code = t.get('task_code', tid)
+        has_pred = tid in pred_map
+        has_succ = tid in succ_map
+        ts, tf = _task_start(t), _task_finish(t)
+        pred_exempt = (ttype == 'TT_Mile' and net_start is not None
+                       and ts is not None and ts <= net_start)
+        succ_exempt = (ttype == 'TT_FinMile' and net_finish is not None
+                       and tf is not None and tf >= net_finish)
+        if not has_pred and not pred_exempt:
+            missing_pred.append(code)
+        if not has_succ and not succ_exempt:
+            missing_succ.append(code)
+    missing = sorted(set(missing_pred) | set(missing_succ))
+    denom = len(incomplete)
+    pct = len(missing) / denom * 100.0
+    pct_pred = len(missing_pred) / denom * 100.0
+    pct_succ = len(missing_succ) / denom * 100.0
     sev = PASS if pct <= threshold else WARN
     return sev, pct, threshold, (
-        f'{len(missing)} of {len(work_tasks)} activities ({pct:.1f}%) missing '
-        f'predecessor or successor (threshold ≤ {threshold}%).'
-    # Full list — never truncate. CPP forensic-correctness rule: every
-    ), {'missing_count': len(missing), 'examples': list(missing)}
+        f'{len(missing)} of {denom} incomplete activities ({pct:.1f}%) missing '
+        f'predecessor or successor — {len(missing_pred)} missing a predecessor '
+        f'({pct_pred:.1f}%), {len(missing_succ)} missing a successor '
+        f'({pct_succ:.1f}%) (threshold ≤ {threshold}%).'
+    # Full lists — never truncate. CPP forensic-correctness rule: every
+    # activity is listed.
+    ), {'missing_count': len(missing), 'denominator': denom,
+        'missing_pred_count': len(missing_pred), 'missing_pred_pct': pct_pred,
+        'missing_succ_count': len(missing_succ), 'missing_succ_pct': pct_succ,
+        'missing_pred': list(missing_pred), 'missing_succ': list(missing_succ),
+        'examples': list(missing)}
 
 
 def _check_02_leads(preds_all, profile):
@@ -754,7 +810,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None):
     per_check = {}
     check_results = []
 
-    sev, val, thr, msg, det = _check_01_logic(work_tasks, pred_map, succ_map, prof)
+    sev, val, thr, msg, det = _check_01_logic(work_tasks, incomplete, pred_map, succ_map, prof)
     check_results.append(('DCMA-01-Logic', 'Logic', 'DCMA 14-Point #1', sev, val, thr, msg, det))
 
     sev, val, thr, msg, det = _check_02_leads(preds_for_project, prof)
