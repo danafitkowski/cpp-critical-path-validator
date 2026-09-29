@@ -207,6 +207,40 @@ def _finish_setters(incomplete_tasks, preds, work_ids):
     return {tid for tid, v in finish.items() if v is not None and v == latest}
 
 
+def _finishes_with(task, finish, cal_map, helpers):
+    """True when the task's stored early finish is where `finish` (a stored P6
+    date) is: on the same day, or with no working day between the two on the
+    task's own calendar as the engine reads them, so an activity closing on
+    Friday evening finishes with a network that ends at Monday's opening. The
+    engine counts whole days: a time from noon on is the close of its day and
+    an earlier one its opening, so hours inside a day do not separate the two;
+    without a calendar it compares the instants as they are. Without the
+    engine (`helpers` None) only the same day counts. False when either date
+    is missing."""
+    ef = task.get('early_end_date', '')
+    ef_at, finish_at = _stored_instant(ef), _stored_instant(finish)
+    if ef_at is None or finish_at is None:
+        return False
+    if ef_at.date() == finish_at.date():
+        return True
+    if helpers is None:
+        return False
+    cal = cal_map.get(task.get('clndr_id', '')) if cal_map else None
+    return (helpers['snap_fwd'](helpers['instant_of'](ef), cal, alerts=[], ctx='terminal')
+            == helpers['snap_fwd'](helpers['instant_of'](finish), cal, alerts=[], ctx='terminal'))
+
+
+def _engine_date_helpers():
+    """The engine's day arithmetic for _finishes_with, from cpp-cpm-engine's
+    `cpm` module when it is on the path (as Check 2's LPM cross-check takes
+    it), or None when it is not: callers then compare days only."""
+    try:
+        import cpm
+        return {'instant_of': cpm._instant_of, 'snap_fwd': cpm._snap_fwd}
+    except Exception:  # pragma: no cover - the engine is optional
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────
 # MAIN VALIDATION FUNCTION
 # ─────────────────────────────────────────────────────────────────────
@@ -282,6 +316,7 @@ def validate_critical_path(data, project_index=0, profile='commercial',
 
     # Filter out LOE/WBS
     work_tasks = [t for t in tasks if not _is_loe(t)]
+    _work_task_ids = {t['task_id'] for t in work_tasks}
     incomplete_tasks = [t for t in work_tasks if not _is_complete(t)]
     complete_tasks = [t for t in work_tasks if _is_complete(t)]
     active_tasks = [t for t in work_tasks if t.get('status_code', '') == ACTIVE_STATUS]
@@ -563,16 +598,44 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     cp_no_pred = []
     cp_no_succ = []
 
-    # Identify terminal milestone(s) — the last CP activity with no successor
-    # is legitimate if it's a finish milestone at the end of the network.
-    # Find the CP activity with the latest early finish and no successor.
+    # Identify the terminal(s): the CP activity or activities with no successor
+    # where the network ends, which legitimately have none.
+    #
+    # Position, not task type. Every critical milestone with no successor used
+    # to count as terminal whatever its date, and any one of them switched off
+    # the latest-early-finish fallback (now kept only for a file with no
+    # network finish, in the second branch below). On a schedule converted
+    # from MS Project (no scheduled finish, every open end at zero float) a
+    # finish milestone well before the finish became the terminal, and the real
+    # last activity was reported as a critical open end; on P6 exports, Finish
+    # On or Before contract milestones with no successor were excused months
+    # before the finish. A candidate is now the terminal only where it finishes
+    # with the network (_finishes_with): at the latest stored early finish of
+    # the work tied to other work (_finish_setters, which CHECK 8 anchors on
+    # too), or at the project's scheduled finish as before. A candidate the
+    # file stores no early finish for cannot be placed, so it is not excused.
+    # A file with no network finish to read keeps the rule as it was: the type
+    # is all it has. The latest finisher with logic is the end even when it is
+    # work finishing after the completion milestone; the milestone is then the
+    # open end, and every missing-successor finding names where the network
+    # finishes, so both ends show.
     terminal_ids = set()
     cp_no_succ_candidates = [
         a for a in cp_activities if not a['has_successor']
     ]
-    if cp_no_succ_candidates:
-        # The P6 field for scheduled finish is `scd_end_date` (not sched_end_date).
-        sched_finish = project.get('scd_end_date', '') or project.get('plan_end_date', '')
+    # The P6 field for scheduled finish is `scd_end_date` (not sched_end_date).
+    sched_finish = project.get('scd_end_date', '') or project.get('plan_end_date', '')
+    _network_finish_setters = _finish_setters(incomplete_tasks, preds, _work_task_ids)
+    _network_finish = (task_map[min(_network_finish_setters)].get('early_end_date', '')
+                       if _network_finish_setters else '')
+    if cp_no_succ_candidates and _network_finish_setters:
+        _finishes = [_network_finish, sched_finish]
+        _helpers = _engine_date_helpers()
+        for cand in cp_no_succ_candidates:
+            t = task_map.get(cand['task_id'], {})
+            if any(_finishes_with(t, f, cal_map, _helpers) for f in _finishes if f):
+                terminal_ids.add(cand['task_id'])
+    elif cp_no_succ_candidates:
         for cand in cp_no_succ_candidates:
             t = task_map.get(cand['task_id'], {})
             ef = t.get('early_end_date', '')
@@ -671,11 +734,23 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             'affected_activity': entry['task_code'],
         })
 
+    # Each open end is judged against where the network finishes, so the
+    # finding names it: the reader sees both ends, even where the later one is
+    # work finishing after the completion milestone.
+    _finish_note = ''
+    if _network_finish_setters:
+        _finish_note = ' The network finishes at %s (%s).' % (
+            ', '.join("'%s - %s'" % (task_map[tid].get('task_code', ''),
+                                     task_map[tid].get('task_name', ''))
+                      for tid in sorted(_network_finish_setters,
+                                        key=lambda i: task_map[i].get('task_code', ''))),
+            _network_finish)
     for entry in cp_no_succ:
         results['recommendations'].append({
             'priority': 'Critical',
             'category': 'Open Ends on CP',
-            'finding': f"Critical activity '{entry['task_code']} - {entry['task_name']}' has NO SUCCESSORS.",
+            'finding': (f"Critical activity '{entry['task_code']} - {entry['task_name']}' "
+                        f"has NO SUCCESSORS.{_finish_note}"),
             'recommendation': 'Add a logical successor connecting to the project completion milestone. Without one, critical path cannot flow through this activity correctly.',
             'affected_activity': entry['task_code'],
         })
@@ -1025,9 +1100,10 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     # the finish, and finished work is not where the remaining work ends. One
     # trade-off is left by design: the latest finisher with logic is taken as
     # the end even when it is a stray dead end, because nothing separates it
-    # from a real last activity without losing those; CHECK 3 still reports
-    # its missing successor.
-    _work_task_ids = {t['task_id'] for t in work_tasks}
+    # from a real last activity without losing those. CHECK 3 reads the end
+    # the same way: it reports the stray's missing successor when the stray
+    # floats, and otherwise reports the earlier activity with no successor and
+    # names the stray as where the network finishes.
     gate_milestones = {t['task_id'] for t in work_tasks
                        if _is_alap_gate(t, succ_map, _work_task_ids)}
     critical_finish = {t['task_id'] for t in work_tasks
@@ -1041,10 +1117,12 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             if t.get('task_type', '') == 'TT_FinMile' and t['task_id'] not in gate_milestones:
                 finish_milestones.add(t['task_id'])
 
-    # Always fold in CHECK 3's terminals, so the two checks agree on where the
-    # network ends; they are already ids among our tasks. CHECK 3 accepts any
-    # critical milestone with no successor as a terminal, a start milestone
-    # included and whatever its date, so this check inherits that rule.
+    # Always fold in CHECK 3's terminals: the critical activities with no
+    # successor that finish with the network, of any task type (only a file
+    # with no network finish to read still takes every critical milestone with
+    # no successor, a start milestone included). This keeps the two checks in
+    # agreement on where the network ends; the ids are already among our
+    # tasks.
     finish_milestones |= {tid for tid in terminal_ids if tid in all_task_ids}
 
     # Where the network ends: the activity or activities that set the

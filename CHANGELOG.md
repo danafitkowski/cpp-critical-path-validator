@@ -7,7 +7,7 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 ## Unreleased
 
 Changes on `main` since the v0.1.0 tag: corrections to the build, to public claims,
-to the bundled parser's output, and to how Check 8 finds where the project
+to the bundled parser's output, and to how Checks 3 and 8 find where the project
 finishes. No check has been added.
 
 ### Fixed
@@ -40,14 +40,42 @@ finishes. No check has been added.
   with a real finish milestone reads as before. The fallback to every finish milestone
   still fires only when no finish milestone is critical, a critical gate included. An
   activity with no logic can still anchor the trace as a finish milestone under that
-  fallback or as a Check 3 terminal, and Check 3 then reports its missing predecessor.
+  fallback, or as a Check 3 terminal where it finishes with the network (see the next
+  entry), and Check 3 then reports its missing predecessor.
 
   The one case that now reports more is a gate whose successors lead nowhere: the
   gate, and any work whose only way forward runs through it, had counted as connected
   because the gate itself was an anchor, and are now reported as disconnected. One
   trade-off is kept by design: the latest finisher with logic is taken as the end even
   when it is a stray dead end, because nothing separates it from a real last activity.
-  Check 3 still reports its missing successor.
+  Check 3 reads the end the same way: it reports the stray's missing successor when
+  the stray floats, and otherwise reports the earlier activity with no successor and
+  names the stray as where the network finishes.
+
+- **Open ends (Check 3) find the terminal by position, not task type.** Check 3 excuses
+  the terminal, the critical activity with no successor where the network ends, from
+  its open-end count. Every critical milestone with no successor counted as a terminal
+  whatever its date, and any one of them switched off the fallback to the latest early
+  finish. On a schedule converted from MS Project (no scheduled finish, every open end
+  critical) a finish milestone well before the finish became the terminal, and the
+  real last activity was reported as a critical open end. On P6 exports, Finish On or
+  Before contract milestones with no successor were excused months before the finish.
+  With the fold-in above this matters to Check 8 too: a start milestone or unlinked
+  activity that was a terminal only by type would have anchored it.
+
+  A critical activity with no successor is now the terminal only where it finishes
+  with the network: on the day of the stored early finish of the activities that set
+  the finish (the ones Check 8 anchors on), or with no working day between the two on
+  its own calendar, or on the project's scheduled finish day as before. An activity
+  the file stores no early finish for cannot be placed and is not excused. A file with
+  no network finish to read (no activity tied to other work stores an early finish)
+  keeps the old rule. A dead end before the finish, and the work that leads only to
+  it, now read as disconnected in Check 8, where Check 3 reports the open end.
+
+  The working-day test takes cpp-cpm-engine's `cpm` module when it is on the path, as
+  Check 2's LPM cross-check does. Without it only the same day counts, so an activity
+  that finishes at one working day's close is not matched with a network that
+  finishes at the next working day's opening, and is reported as an open end.
 
 - **CI is green again.** The last four runs (2026-05-16, 2026-08-19, 2026-08-22 and
   2026-08-23) each failed on exactly one step, the `xer_parser.py` drift check, in
@@ -119,6 +147,9 @@ finishes. No check has been added.
   Check 3's terminals among the anchors. It counted the finish milestones the trace
   started from (every one when none was critical); gates are no longer counted, and
   Check 3's terminals now are.
+- **Check 3's missing-successor findings** end with a sentence naming where the
+  network finishes, for example `The network finishes at 'F160 - Hand over to the
+  owner' (2027-03-29 17:00).`
 
 ### Added
 
@@ -133,6 +164,13 @@ finishes. No check has been added.
   work, a level of effort, ALAP as the secondary constraint, no stored early dates,
   and the trade-off above), and a chain with no early dates that ends in an ordinary
   task. CI runs it under pytest and directly.
+- **`tests/test_open_ends_terminal_position_2026_09_28.py`**, 17 tests on synthetic
+  data: the early finish milestone and the contract milestone that used to be
+  excused, the working-day match on the activity's own calendar, unlinked and undated
+  activities, the finding text, the trade-off, a real finish milestone and a file with
+  no early dates that read as before, and Check 8 reading an early dead end as
+  disconnected. Two need cpp-cpm-engine's `cpm` module and are skipped without it.
+  CI runs it under pytest and directly.
 - **A "Scope and status" section in the README**, recording that this is a public
   subset of a larger internal validator and recording the vendored parser's exact
   provenance.

@@ -12,6 +12,7 @@ Thank you for considering a contribution. These checks come out of court-filed f
    python tests/test_dcma14.py
    python tests/test_cp_forensic.py
    python tests/test_logic_continuity_completion_anchor_2026_09_28.py
+   python tests/test_open_ends_terminal_position_2026_09_28.py
    ```
    Or with pytest:
    ```bash
