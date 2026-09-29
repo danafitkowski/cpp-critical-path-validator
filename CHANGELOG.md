@@ -4,12 +4,16 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
-## Unreleased
+## v0.3.1 — 2026-09-29
 
 The validator gives the embedded DCMA-14 report's worst severity at the top level of its
 results, beside a headline now labelled as logic health, as CPP's internal validator
 does. The bundled parser files are `cpp-xer-parser` v0.2.1's, whose report carries the
-summary this reads. No existing result moves: the change adds keys and a dashboard line.
+summary this reads. No existing result moves: the release adds keys and a dashboard line.
+
+**Why a patch.** Before 1.0 this project moves the minor number for a release that
+changes results a caller already reads, as v0.3.0 did with the list at the top of its
+notes, and the patch number for one that only adds. This one only adds, so it is v0.3.1.
 
 ### Added
 
