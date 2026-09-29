@@ -113,13 +113,21 @@ report = dcma_14_assess(
     profile='commercial',   # or 'nuclear' or 'mining'
 )
 
-print(f"DCMA Score: {report['dcma_score']}/14")
+print(f"DCMA Score: {report['dcma_score']} of {report['dcma_max']} assessed")
+print(f"Not assessed: {report['dcma_not_assessed']}")
 print(f"CPLI: {report['cpli']}")
 print(f"BEI:  {report['bei']}")
 
 for check_id, check in report['per_check'].items():
     print(f"  {check_id}: {check['severity']} — {check['message']}")
 ```
+
+The check ids follow the numbering of DCMA-EA PAM 200.1, ending `DCMA-11-MissedTasks`,
+`DCMA-12-CriticalPathTest`, `DCMA-13-CPLI` and `DCMA-14-BEI`. The score is out of the
+criteria the file could support: one that cannot be evaluated (BEI with no baseline, the
+Critical Path Test where nothing structural decides it, the float-dependent criteria on
+a file with no computed float) is reported INFO, left out of both numbers and listed in
+`dcma_not_assessed`; it never scores.
 
 Three profiles bundle out of the box:
 

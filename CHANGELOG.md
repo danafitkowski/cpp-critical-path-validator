@@ -8,7 +8,9 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 Changes on `main` since the v0.1.0 tag: corrections to the build, to public claims,
 to the bundled parser's output, to how Checks 3 and 8 find where the project
-finishes, and to what DCMA-14 #1 counts. No check has been added.
+finishes, and to the DCMA-14 assessment, which now follows the published numbering
+and scores only what it measured. No logic-health check has been added; the Critical
+Path Test, DCMA #12, is now assessed where the file decides it.
 
 ### Fixed
 
@@ -202,6 +204,67 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
   `scripts/config_profiles.py` already matched upstream at `a8edac6`. On a plain clone
   `validate_schedule` and `aace_31r_compliance` now both run, and a new test pins it
   (see Added).
+- **DCMA-14 #1 to #4 read only the project's own relationships.** A relationship with
+  one end in another project of the same export counted as this project's logic (`or`
+  where `and` was meant), which inflated the relationship set of a multi-project file
+  for #2, #3 and #4 and gave #1 a predecessor or successor that belongs to another
+  project.
+- **DCMA-14 #6, #7 and #13 read a blank total float as missing data.** High Float and
+  Negative Float read a blank `total_float_hr_cnt` as 0, so they passed silently on a
+  file carrying no float at all, while the critical set read it as 999, so such
+  activities silently left the set and CPLI came back not computable with no reason
+  given. Such activities are now dropped from those populations and their count
+  disclosed; a file with no computed float on any incomplete activity reads NOT
+  ASSESSED on all three. The critical set also honours
+  `PROJECT.critical_drtn_hr_cnt`, P6's own "critical when total float is less than or
+  equal to" setting, instead of a hard-coded zero.
+- **DCMA-14 #9 reads the forecast dates the standard names.** Section 4.9 of DCMA-EA
+  PAM 200.1 counts an incomplete activity with a forecast (early) start or finish
+  before the status date, and any activity with an actual date after it. The check
+  never read an early date: it tested the planned finish, which is #11's business, so
+  open activities were flagged for a historical planned finish while stale forecasts
+  passed. It also counted one issue per field and called the total a number of
+  activities. Issues are now grouped by activity, the forecast and actual counts are
+  reported separately, a started activity is read on its forecast finish only, and an
+  activity with no early date to read is disclosed rather than counted.
+- **DCMA-14 #10 is "Not scored" when a profile disables it.** With the threshold at 0
+  it returned PASS, a point for a criterion nothing had measured. It is INFO now and
+  stays out of the score. The three bundled profiles all set a threshold, so on them
+  it is scored as before.
+- **DCMA-14 #11 counts late finishes and reads the baseline.** Missed Tasks counted
+  only the activities still open at the status date, so one that finished after its
+  due date was invisible. It now counts a due activity that is still open OR finished
+  late, takes its due dates from the baseline when one is supplied (matched on activity
+  code, since task ids are renumbered on every export), and says which basis it used.
+- **DCMA-14 #12, the Critical Path Test, has a criterion of its own.** Slot 12 was an
+  echo of #10. The published test needs a 600-day insertion and a CPM recalculation,
+  which this module does not perform, so it never claims a pass: it fails where the
+  file decides the failure, a project finish held by a Mandatory Start or Mandatory
+  Finish or with no predecessor at all, and reads NOT ASSESSED otherwise. A Start On or
+  Finish On date is not a pin: P6 can move the early date past it and shows the
+  lateness as negative float, which section 4.12 counts as a pass.
+- **DCMA-14 #13, CPLI, can exceed 1.0, and an activity that is not the project finish
+  no longer drives it below zero.** The float term was the minimum float over the
+  critical set, and the critical set was the activities at float ≤ 0, so the index
+  could not exceed 1.0 by construction, and one deeply negative activity anywhere on
+  the critical set could drive it below zero. It now takes the float of the project finish
+  activity, as published, and measures the critical path in working days on the
+  project calendar from the status date to the project finish, not in wall-clock hours
+  divided by hours per day, which counted every night and weekend.
+- **DCMA-14 #14, BEI, is unrestricted and one project's.** The numerator counted only
+  the baseline-due activities that were complete, a subset of the denominator, so BEI
+  was capped at 1.0 and could never show work pulled ahead. It now counts every
+  activity complete as of the status date, as published. It and #11 read the assessed
+  project's rows and the matching baseline project's (same id, else same short name,
+  else the project sharing the most activity codes), not every row in either file.
+- **The critical-path continuity extension (`DCMA-Ext-CPContinuity`) no longer reports
+  a floated merge input as a break.** A critical activity may take non-critical
+  predecessors alongside the critical chain; the previous reading called every
+  incomplete non-critical predecessor a gap, so every merge point reported a
+  discontinuity. A break is now a critical activity that has incomplete predecessors
+  and none of them on the critical path. Each gap carries the predecessor's status,
+  driving flag, total float and tie type, and the result counts the activities checked
+  (`cp_activities_checked`).
 - **The AACE badge no longer advertises retracted Recommended Practices.** The README
   badge rendered `AACE: 49R-06 | 24R-03 | 67R-11` while the AACE alignment section
   below it explained that the 24R-03 and 67R-11 rows had been removed as wrongly
@@ -220,6 +283,47 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
 
 ### Changed
 
+- **DCMA-14 follows the published numbering, and its score is out of the criteria it
+  assessed.** This changes the `per_check` keys and the meaning of `dcma_score`. The
+  fourteen were numbered here with two cross-reference echoes: `DCMA-11-InvalidDatesFuture`
+  repeated #9's verdict and `DCMA-12-ResourceCoverage` repeated #10's, so a passing #9
+  or #10 scored twice, a failing one was reported twice, and a clean file read 14 of 14
+  with two points measured once; Missed Tasks sat at #13, CPLI at #14, and BEI was
+  reported outside the fourteen under the key `BEI`. The registry now runs #1 to #14 as
+  DCMA-EA PAM 200.1 orders them, ending `DCMA-11-MissedTasks`,
+  `DCMA-12-CriticalPathTest`, `DCMA-13-CPLI` and `DCMA-14-BEI`. A criterion the file
+  cannot support is INFO, left out of both the numerator and the denominator and named
+  in the new `dcma_not_assessed`: BEI with no baseline, the Critical Path Test where
+  nothing structural decides it, the float-dependent criteria on a file with no computed
+  float, Resources under a profile that disables its threshold. `dcma_score` counts the
+  criteria passed and the new `dcma_max` the criteria assessed, so a report reads "x of
+  y assessed" and never "x / 14" with two criteria counted twice.
+  `render_dcma_scorecard_html` prints that, lists what was not assessed, and colours
+  the score by the share of assessed criteria passed. The result also names the
+  project it graded (`proj_id`, `project_name`, `data_date`), the baseline project its
+  checks 11 and 14 read (`baseline_proj_id`, `baseline_project_match`), and a
+  `calendar_resolution` block; `validate_critical_path` carries all of them into
+  `results['dcma_14']`. The details of #13 name the project finish activity and its
+  float as `finish_activity` and `tf_days`; `tf_days_min`, the minimum float over the
+  critical set, went with the rule that read it (see Fixed).
+
+  Known limits: the bundled parser resolves no blank task calendar onto the project
+  calendar, so `calendar_resolution` is empty and says so, and an activity with no
+  calendar of its own is read at 8 h/day in #6, #8 and #13; and #9's finding carries no
+  data date correction sentence, which needs a module this repository does not ship.
+  The working-day advance #13 measures the critical path with is defined in
+  `dcma14.py` until the bundled parser carries it: it counts the calendar's worked
+  weekdays, holidays off and worked exceptions on, reads dates on their calendar day,
+  and refuses a span beyond a hundred years as a sentinel finish. A parser that carries
+  `work_day_delta` is used instead, and `tests/test_dcma14_guards.py` holds it to the
+  same reading.
+- **`dcma_14_assess` takes `proj_id`, and `validate_critical_path` passes the project
+  it selected**, so the embedded DCMA block describes the same project as the report's
+  title and population on a multi-project export. Left out, the assessment picks the
+  project with the latest data date (ties by activity count) instead of the one with
+  the most activities: a baseline copy or an older snapshot in the same file routinely
+  carries more rows than the live schedule. An id the file does not carry raises
+  `ValueError` rather than grading an empty population.
 - **`finish_milestones_found` in Check 8's result** counts the finish milestones and
   Check 3's terminals among the anchors. It counted the finish milestones the trace
   started from (every one when none was critical); gates are no longer counted, and
@@ -237,6 +341,36 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
 
 ### Added
 
+- **`dcma_max`, `dcma_not_assessed`, `proj_id`, `project_name`, `data_date`,
+  `baseline_proj_id`, `baseline_project_match` and `calendar_resolution` in the DCMA-14
+  result**, and the `proj_id` argument of `dcma_14_assess` (see Changed).
+- **`tests/test_dcma14_published_standard.py`**, 14 tests on synthetic data: CPLI can
+  exceed 1.0 and is not dominated by the deepest negative activity, BEI's unrestricted
+  numerator, Missed Tasks counting late finishes and reading the baseline, the Critical
+  Path Test failing on a mandatory pin and never claiming a pass, one failure costing
+  exactly one point, blank float reported as not assessed, the project's own critical
+  threshold, and four lock tests: remaining duration in #8, a target of zero in #9, no
+  magnitude gate in #3, the profile floor in #13.
+- **`tests/test_dcma09_invalid_dates_2026_09_21.py`**, 9 tests on #9 against section
+  4.9 of DCMA-EA PAM 200.1: stale forecasts, an updated late activity, one activity
+  counted once, started work read on its forecast finish, completed work, dates on
+  the status date, missing forecasts disclosed, and the message.
+- **`tests/test_dcma12_soft_constraint_2026_09_21.py`**, 6 tests on #12: Finish On and
+  Start On completions not assessed, a completion with no predecessor failing for
+  that reason, a mandatory finish failing, an unconstrained one, and the premise run
+  on cpp-cpm-engine, skipped without it.
+- **`tests/test_project_scope_2026_09_21.py`**, 11 tests: the validator and its DCMA
+  block grade the same project, `project_index` reaching the block, the latest-data-date
+  rule and `proj_id`, checks 11 and 14 reading the matching baseline project, and the
+  invariant that an unrelated project in either file changes no figure of the selected
+  one.
+- **`tests/test_dcma14_guards.py`**, 9 tests: the published registry, the in-project
+  relationship set, CPLI in working days, the working-day advance itself (holidays,
+  worked exceptions, clock times), the sentinel-finish guard, the continuity
+  extension's merge and break cases, Check 2's no-critical-path guard, and no
+  low-contrast text in the scorecard. CI runs it under pytest and directly.
+- `tests/test_dcma14.py` is re-pinned to the published numbering and the assessed
+  denominator, with two more tests (13 in all).
 - **`completion_anchors` and `gate_milestones` in Check 8's result**: the task codes
   the trace started from, and the As Late As Possible finish milestones set aside as
   gates.

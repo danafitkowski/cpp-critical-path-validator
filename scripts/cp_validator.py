@@ -1353,19 +1353,37 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     # on the legacy output.
     try:
         from dcma14 import dcma_14_assess
-        dcma_result = dcma_14_assess(data, profile=profile, baseline_data=baseline_data)
+        # The project this report selected is the one the DCMA block grades, so
+        # the block cannot describe a different project from the report's own
+        # title and population on a multi-project export.
+        dcma_result = dcma_14_assess(data, profile=profile,
+                                     baseline_data=baseline_data,
+                                     proj_id=target_proj_id)
         # Convert the ValidationReport to a dict so the whole results blob is
         # JSON-serializable (dashboard writes JSON alongside HTML).
         results['dcma_14'] = {
             'profile': dcma_result['profile'],
             'profile_name': dcma_result.get('profile_name', dcma_result['profile']),
+            # The project this block was measured on, and the baseline project
+            # its checks 11 and 14 read — the report can be checked against them.
+            'proj_id': dcma_result['proj_id'],
+            'project_name': dcma_result['project_name'],
+            'data_date': dcma_result['data_date'],
+            'baseline_proj_id': dcma_result['baseline_proj_id'],
+            'baseline_project_match': dcma_result['baseline_project_match'],
             'dcma_score': dcma_result['dcma_score'],
+            # Denominator = criteria actually assessed on this file. Carrying it
+            # through is what stops the report printing "x / 14" when only some
+            # of the fourteen could be evaluated.
+            'dcma_max': dcma_result['dcma_max'],
+            'dcma_not_assessed': dcma_result['dcma_not_assessed'],
             'cpli': dcma_result['cpli'],
             'bei': dcma_result['bei'],
             'critical_paths': dcma_result['critical_paths'],
             'multiple_critical_paths': dcma_result['multiple_critical_paths'],
             'cp_continuity': dcma_result['cp_continuity'],
             'per_check': dcma_result['per_check'],
+            'calendar_resolution': dcma_result['calendar_resolution'],
             'report': dcma_result['report'].to_dict(),
         }
     except Exception as e:  # pragma: no cover - defensive

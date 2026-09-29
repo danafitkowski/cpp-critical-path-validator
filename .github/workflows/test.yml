@@ -63,6 +63,7 @@ jobs:
           python tests/test_bundled_validation_runs.py
           python tests/test_dcma14_logic.py
           python tests/test_open_ends_floating_finish_2026_09_28.py
+          python tests/test_dcma14_guards.py
 
       # The vendored parser is checked against a PINNED upstream commit rather
       # than against `main`, and the hard check is offline.
