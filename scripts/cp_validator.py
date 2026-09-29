@@ -1116,6 +1116,13 @@ def validate_critical_path(data, project_index=0, profile='commercial',
                        if _is_alap_gate(t, succ_map, _work_task_ids)}
     critical_finish = {t['task_id'] for t in work_tasks
                        if t.get('task_type', '') == 'TT_FinMile' and t['task_id'] in cp_task_ids}
+    # A critical finish milestone anchors wherever it sits, so a sectional
+    # completion counts as a completion. Known limit, kept by design: an early
+    # critical milestone with no successor (MS Project conversions carry them)
+    # also anchors the work that leads only to it, while CHECK 3 reports it as
+    # a critical open end. Anchoring by position alone would read the work
+    # behind real sectional completions, such as the area finish milestones of
+    # a multi-area schedule, as disconnected.
     finish_milestones = critical_finish - gate_milestones
 
     # If no critical finish milestones, find any finish milestone. A critical
@@ -1129,8 +1136,8 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     # successor that finish with the network, of any task type (only a file
     # with no network finish to read still takes every critical milestone with
     # no successor, a start milestone included). This keeps the two checks in
-    # agreement on where the network ends; the ids are already among our
-    # tasks.
+    # agreement on where a clean linear network ends; the ids are already
+    # among our tasks.
     finish_milestones |= {tid for tid in terminal_ids if tid in all_task_ids}
 
     # Where the network ends: the activity or activities that set the

@@ -81,9 +81,10 @@ finishes. No check has been added.
   - The bundled parser does not read a blank task calendar as the project calendar,
     so an activity with no calendar of its own is compared without one, and its
     Friday-evening finish is not matched with a Monday-morning one.
-  - A critical finish milestone with no successor before the finish is now reported
-    by Check 3, but it still anchors Check 8 as a finish milestone, so Check 8 does
-    not report the work that leads only to it.
+  - By design, a critical finish milestone anchors Check 8 wherever it sits, so a
+    sectional completion counts as a completion. An early critical finish milestone
+    with no successor (MS Project conversions carry them) therefore also anchors the
+    work that leads only to it, while Check 3 reports it as a critical open end.
   - DCMA-14 #1 in this repository still exempts every finish milestone from its
     missing-successor count, whatever its date. Check 3 and DCMA-14 #1 can therefore
     name different activities: where the finish milestone comes before the activity
