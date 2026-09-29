@@ -100,6 +100,7 @@ __all__ = [
     # Calendar
     'parse_calendar_data', 'get_calendar_map',
     'get_work_days_between', 'duration_hours_to_days',
+    'resolve_task_calendars', 'with_resolved_calendars', 'calendar_resolution_block',
     # Cross-reference
     'build_wbs_map', 'build_resource_map',
     'build_predecessor_map', 'build_activity_code_map', 'build_udf_map',
@@ -652,7 +653,8 @@ def _xer_exception_serial_to_iso(serial_raw):
 def get_calendar_map(data):
     """
     Build a calendar lookup: clndr_id → parsed calendar info.
-    Includes hours_per_day from the CALENDAR table's day_hr_cnt field.
+    Includes hours_per_day from the CALENDAR table's day_hr_cnt field, and
+    the row's default_flag as the file writes it.
     """
     calendars = get_table(data, 'CALENDAR')
     cal_map = {}
@@ -662,6 +664,10 @@ def get_calendar_map(data):
         parsed = parse_calendar_data(cal.get('clndr_data', ''))
         parsed['clndr_id'] = clndr_id
         parsed['clndr_name'] = cal.get('clndr_name', '')
+        # As the file writes it. A consumer that needs the default calendar
+        # reads it off this entry; "the first calendar in the file" is not a
+        # substitute, since table order says nothing about which is default.
+        parsed['default_flag'] = cal.get('default_flag', '') or ''
 
         # Hours per day
         day_hr = cal.get('day_hr_cnt', '8')
@@ -680,6 +686,176 @@ def get_calendar_map(data):
         cal_map[clndr_id] = parsed
 
     return cal_map
+
+
+def resolve_task_calendars(data):
+    """The calendar every TASK row is scheduled on, blank clndr_id included.
+
+    A blank TASK.clndr_id is not "no calendar": it means the project calendar.
+    MPXJ writes it that way for every MS Project task that has no task-level
+    calendar, and MS Project schedules such a task on the project calendar.
+    Looking the blank id up in ``get_calendar_map`` returns None, and a
+    consumer then falls through to its own last resort: 8 h/day in
+    ``duration_hours_to_days``, without a word, and in cpp-cpm-engine a
+    continuous seven-day week, with an ALERT, unless the caller hands it the
+    project calendar.
+
+    The chain, per TASK row:
+
+      1. TASK.clndr_id, when the row carries one;
+      2. PROJECT.clndr_id of the row's own proj_id, when the CALENDAR table
+         declares it (tier ``'project'``);
+      3. the first CALENDAR row flagged default_flag = 'Y' (tier ``'default'``);
+      4. unresolved - reported under ``unresolved``, reason ``'blank'``.
+
+    A row NAMING a calendar the CALENDAR table does not declare is reported
+    too (reason ``'undeclared'``) and keeps its id: handing it the project
+    calendar would swap in a week the activity was never assigned.
+
+    Ids are matched EXACTLY as the file writes them, because that is how
+    ``get_calendar_map`` keys them and the parser keeps a padded id padded: an
+    id tidied here would be reported resolved while every lookup on it missed.
+    Only "blank" is judged after stripping.
+
+    Returns a dict:
+      ``by_task``              {task_id: clndr_id} for every TASK row; '' when
+                               nothing resolved. Keyed by P6's primary key, so
+                               rows sharing a task_id share a slot - fill rows
+                               with ``with_resolved_calendars``, which does not
+                               go through it.
+      ``project_calendar``     {proj_id: clndr_id} - each project's declared
+                               calendar, '' when it names none the file has.
+      ``default_clndr_id``     the default_flag = 'Y' calendar, or ''.
+      ``resolved_by_fallback`` rows resolved by tier 2 or 3: task_id,
+                               task_code, proj_id, clndr_id, clndr_name, tier.
+      ``unresolved``           rows with no usable calendar: task_id,
+                               task_code, task_name, proj_id, clndr_id, reason.
+    Both lists are complete and in file order.
+    """
+    declared = {}
+    default_id = ''
+    for c in get_table(data, 'CALENDAR'):
+        cid = c.get('clndr_id', '') or ''
+        if not cid.strip():
+            continue
+        declared.setdefault(cid, (c.get('clndr_name') or '').strip())
+        if not default_id and (c.get('default_flag') or '').strip().upper() == 'Y':
+            default_id = cid
+
+    project_calendar = {}
+    for p in get_table(data, 'PROJECT'):
+        pcid = p.get('clndr_id', '') or ''
+        project_calendar[p.get('proj_id', '')] = pcid if pcid in declared else ''
+
+    by_task = {}
+    resolved_by_fallback = []
+    unresolved = []
+    for t in get_table(data, 'TASK'):
+        tid = t.get('task_id', '')
+        proj_id = t.get('proj_id', '')
+        cid = t.get('clndr_id', '') or ''
+        tier = ''
+        if not cid.strip():
+            cid = project_calendar.get(proj_id, '')
+            tier = 'project'
+            if not cid:
+                cid, tier = default_id, 'default'
+        by_task[tid] = cid
+        if cid in declared:
+            if tier:
+                resolved_by_fallback.append({
+                    'task_id': tid,
+                    'task_code': t.get('task_code', ''),
+                    'proj_id': proj_id,
+                    'clndr_id': cid,
+                    'clndr_name': declared[cid],
+                    'tier': tier,
+                })
+            continue
+        unresolved.append({
+            'task_id': tid,
+            'task_code': t.get('task_code', ''),
+            'task_name': (t.get('task_name') or '').strip(),
+            'proj_id': proj_id,
+            'clndr_id': cid,
+            'reason': 'undeclared' if cid else 'blank',
+        })
+    return {
+        'by_task': by_task,
+        'project_calendar': project_calendar,
+        'default_clndr_id': default_id,
+        'resolved_by_fallback': resolved_by_fallback,
+        'unresolved': unresolved,
+    }
+
+
+def with_resolved_calendars(tasks, resolution):
+    """TASK rows carrying the clndr_id ``resolve_task_calendars`` gave them.
+
+    For a consumer that looks calendars up as ``cal_map.get(row['clndr_id'])``:
+    feed it these rows and every lookup it makes sees the resolved calendar.
+    Only a row whose own clndr_id is BLANK is ever filled, so a calendar the
+    file names is never overridden, and each row is filled from its OWN
+    proj_id, so malformed rows sharing a task_id cannot take each other's
+    calendar. A filled row is a COPY - the parsed data keeps the file as
+    received - and every other row is passed through as the same object.
+    """
+    resolution = resolution or {}
+    project_calendar = resolution.get('project_calendar') or {}
+    default_id = resolution.get('default_clndr_id') or ''
+    out = []
+    for t in tasks:
+        if not (t.get('clndr_id') or '').strip():
+            cid = project_calendar.get(t.get('proj_id', ''), '') or default_id
+            if cid:
+                t = dict(t, clndr_id=cid)
+        out.append(t)
+    return out
+
+
+def calendar_resolution_block(resolution, keep=None):
+    """``resolve_task_calendars`` output as the block a consumer publishes.
+
+    ``resolve_task_calendars`` reports on every TASK row in the file; a
+    consumer schedules only some of them (one project, no LOE / WBS summary,
+    ...) and must disclose what happened to THOSE. ``keep`` is a predicate
+    over a resolution row (task_id, task_code, proj_id, clndr_id, ...) that
+    selects them; None keeps every row. A consumer that builds the block
+    here, rather than keeping its own copy, cannot drift from the shape
+    cpp-critical-path-validator publishes as ``calendar_resolution``:
+
+      ``resolved_by_fallback_count``  blank ids resolved by tier 2 or 3
+      ``fallback_calendars``          [{clndr_id, clndr_name, tier, task_count}]
+      ``unresolved_count``            activities with no usable calendar
+      ``unresolved``                  [{task_code, task_name, clndr_id, reason}],
+                                      task_code falling back to the task_id
+
+    Every row is listed, in file order; the block is never partial.
+    """
+    resolution = resolution or {}
+
+    def _kept(rows):
+        return [r for r in (rows or []) if keep is None or keep(r)]
+
+    fell_back = _kept(resolution.get('resolved_by_fallback'))
+    unresolved = _kept(resolution.get('unresolved'))
+    by_cal = {}
+    for r in fell_back:
+        key = (r['clndr_id'], r['clndr_name'], r['tier'])
+        by_cal[key] = by_cal.get(key, 0) + 1
+    return {
+        'resolved_by_fallback_count': len(fell_back),
+        'fallback_calendars': [
+            {'clndr_id': k[0], 'clndr_name': k[1], 'tier': k[2], 'task_count': v}
+            for k, v in by_cal.items()],
+        'unresolved_count': len(unresolved),
+        'unresolved': [
+            {'task_code': u['task_code'] or u['task_id'],
+             'task_name': u['task_name'],
+             'clndr_id': u['clndr_id'],
+             'reason': u['reason']}
+            for u in unresolved],
+    }
 
 
 def get_work_days_between(start_date, end_date, calendar_info=None):
@@ -1081,7 +1257,10 @@ def generate_summary(data):
             ]
 
     # ── Activity Metrics ──
-    tasks = get_table(data, 'TASK')
+    # Rows carry their RESOLVED calendar (blank clndr_id = project calendar),
+    # so the hours-to-days conversions below divide by the right day length.
+    tasks = with_resolved_calendars(get_table(data, 'TASK'),
+                                    resolve_task_calendars(data))
     cal_map = get_calendar_map(data)
 
     # Filter out LOE and WBS Summary
@@ -1734,6 +1913,9 @@ def validate_schedule(data, profile='commercial', subject=None):
       - File field-count validation (WARN on version-specific mismatch)
       - AACE 29R-03 §2.1: at least one PROJECT record (BLOCK if zero)
       - AACE 29R-03 §2.1.B.10: at least one CALENDAR record (BLOCK if zero)
+      - AACE 29R-03 §2.1.B.10: every TASK row has a usable calendar, a blank
+        clndr_id resolving to the project or default calendar (BLOCK otherwise)
+      - INFO: blank TASK.clndr_id values resolved onto the project calendar
       - CPP profile / AACE 38R-06 §3.5: WBS depth within profile range (BLOCK if below min, WARN if above max)
       - CPP profile / AACE 38R-06 §3.5: activity count within profile range (WARN outside)
       - AACE 29R-03 §2.1.B.5 / DCMA 14-Point #1: TASKPRED ties on real work tasks (BLOCK otherwise)
@@ -1819,6 +2001,60 @@ def validate_schedule(data, profile='commercial', subject=None):
             evidence={'calendar_count': 0},
             reference='AACE 29R-03 §2.1.B.10 (calendar validation)',
         ))
+
+    # ── Activities with no usable calendar ────────────────────────────────
+    # The row gives the arithmetic no calendar at all: duration_hours_to_days
+    # falls to 8 h/day, and cpp-cpm-engine, handed no project calendar, to a
+    # continuous seven-day week. A blank id that resolves to the project
+    # calendar is the file's own meaning and only disclosed.
+    # Skipped when the file has no CALENDAR table - XER-CALENDAR-MISSING
+    # already says that.
+    if calendars:
+        _task_cals = resolve_task_calendars(data)
+        _unres = _task_cals['unresolved']
+        if _unres:
+            _blank = sum(1 for u in _unres if u['reason'] == 'blank')
+            report.add(Finding(
+                severity=BLOCK,
+                check_id='XER-TASK-CALENDAR-UNRESOLVED',
+                message=(
+                    '{n} TASK row(s) have no usable calendar: {b} with a blank '
+                    'clndr_id and no PROJECT.clndr_id or default_flag=Y '
+                    'calendar to fall back on, {u} naming a clndr_id the '
+                    'CALENDAR table does not declare. Working-day arithmetic '
+                    'has no week this file declares to run them on: '
+                    'duration_hours_to_days reads them at 8 h/day, and '
+                    'cpp-cpm-engine, handed no project calendar, schedules '
+                    'them on a continuous seven-day week.'.format(
+                        n=len(_unres), b=_blank, u=len(_unres) - _blank)
+                ),
+                evidence={'unresolved_count': len(_unres),
+                          'blank_count': _blank,
+                          'undeclared_count': len(_unres) - _blank,
+                          'task_codes': [u['task_code'] for u in _unres]},
+                reference='AACE 29R-03 §2.1.B.10 (calendar validation)',
+            ))
+        _fell_back = _task_cals['resolved_by_fallback']
+        if _fell_back:
+            _by_cal = {}
+            for r in _fell_back:
+                _k = (r['clndr_id'], r['clndr_name'], r['tier'])
+                _by_cal[_k] = _by_cal.get(_k, 0) + 1
+            report.add(Finding(
+                severity=INFO,
+                check_id='XER-TASK-CALENDAR-FALLBACK',
+                message=(
+                    '{n} TASK row(s) carry a blank clndr_id and are scheduled '
+                    'on the project calendar (PROJECT.clndr_id, else the '
+                    'default_flag=Y calendar).'.format(n=len(_fell_back))
+                ),
+                evidence={'resolved_count': len(_fell_back),
+                          'calendars': [
+                              {'clndr_id': k[0], 'clndr_name': k[1],
+                               'tier': k[2], 'task_count': v}
+                              for k, v in _by_cal.items()]},
+                reference='P6 XER schema (TASK.clndr_id, PROJECT.clndr_id)',
+            ))
 
     # ── WBS depth ────────────────────────────────
     wbs_map = build_wbs_map(data)

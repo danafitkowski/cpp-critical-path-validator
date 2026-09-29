@@ -76,17 +76,20 @@ from xer_parser import (  # noqa: E402
     NOT_STARTED_STATUS,
     EXCLUDED_TASK_TYPES,
     MILESTONE_TASK_TYPES,
+    resolve_task_calendars,
+    with_resolved_calendars,
+    calendar_resolution_block,
 )
 
 # Reuse the hard-constraint taxonomy from cp_validator — single source of truth.
 from cp_validator import (  # noqa: E402
     HARD_ABSOLUTE, HARD_CONSTRAINTS, HARD_DATE, _hrs_to_days, _safe_float)
 
-# The bundled parser, cpp-xer-parser at the commit CI pins, carries neither the
-# signed working-day advance that #13 CPLI measures the critical path with nor
-# the blank-calendar resolution of the assessment. Each is taken from the
-# parser when it has it, and tests/test_dcma14_guards.py holds the parser's
-# to the same reading; until then the definitions below stand in.
+# The bundled parser, cpp-xer-parser at the commit CI pins, does not carry the
+# signed working-day advance that #13 CPLI measures the critical path with. It
+# is taken from the parser when the parser has it, and
+# tests/test_dcma14_guards.py holds the parser's to the same reading; until
+# then the definition below stands in.
 try:
     from xer_parser import work_day_delta  # noqa: E402
 except ImportError:
@@ -146,28 +149,6 @@ except ImportError:
                 count += 1
             current += timedelta(days=1)
         return sign * count
-
-try:
-    from xer_parser import (  # noqa: E402
-        resolve_task_calendars, with_resolved_calendars, calendar_resolution_block)
-except ImportError:
-    _NO_RESOLUTION = ('the bundled parser does not resolve a blank task calendar '
-                      'onto the project calendar; an activity with no calendar '
-                      'of its own is read at 8 h/day in checks #6, #8 and #13')
-
-    def resolve_task_calendars(data):
-        """No resolution: the bundled parser cannot place a blank clndr_id."""
-        return {}
-
-    def with_resolved_calendars(tasks, task_cals):
-        """The tasks as parsed; nothing was resolved."""
-        return tasks
-
-    def calendar_resolution_block(task_cals, keep=None):
-        """An empty block that says why it is empty."""
-        return {'resolved_by_fallback_count': 0, 'fallback_calendars': [],
-                'unresolved_count': 0, 'unresolved': [],
-                'note': _NO_RESOLUTION}
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1291,9 +1272,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
                                       activities assessed: blank calendar ids
                                       resolved onto the project or default
                                       calendar, and any with no usable calendar
-                                      (those also raise DCMA-Ext-TaskCalendar);
-                                      empty, with a note, when the bundled
-                                      parser cannot resolve them,
+                                      (those also raise DCMA-Ext-TaskCalendar),
         }
     """
     prof = get_profile(profile)
@@ -1308,9 +1287,8 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
     # without a task calendar. A blank id that reaches _hrs_to_days is read as
     # a flat 8 h/day, so on a 10 h/day project calendar High Float #6, High
     # Duration #8 and the CPLI float #13 count 400 h as 50 working days, not
-    # 40. Resolved ONCE here when the parser can do it (see the fallbacks at
-    # the top of this module). The parsed data is not modified;
-    # result['calendar_resolution'] lists what resolved.
+    # 40. Resolved ONCE here, as validate_critical_path does. The parsed data
+    # is not modified; result['calendar_resolution'] lists what resolved.
     task_cals = resolve_task_calendars(data)
     tasks_all = with_resolved_calendars(get_table(data, 'TASK'), task_cals)
     preds_all = get_table(data, 'TASKPRED')

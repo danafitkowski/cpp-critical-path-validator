@@ -4,6 +4,60 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **A blank activity calendar id is read as the project calendar.** MPXJ, converting
+  an MS Project file, writes `TASK.clndr_id` empty for every task without a task-level
+  calendar, and MS Project schedules such a task on the project calendar. The
+  validator found no calendar for the blank id. It read the activity's float and
+  duration, and a lag when the activity at its other end had no calendar either, at a
+  flat 8 h/day whatever the project calendar says. With cpp-cpm-engine present, Check 3
+  also compared the activity's finish with the network's without a working week. On a
+  10 h/day project calendar, 20 h of float read as 2.5 working days instead of 2, and
+  a finish at Friday's close was not matched with a network finish at Monday's
+  opening. Checks 1, 3, 5 and 7, and DCMA-14 #6, #8 and #13, could therefore read the
+  same schedule differently depending on whether its calendar ids were written out.
+
+  `validate_critical_path` and `dcma_14_assess` now take every row through the bundled
+  parser's `resolve_task_calendars` first: the activity's own calendar, else the
+  project's (`PROJECT.clndr_id`), else the calendar flagged `default_flag = 'Y'`. The
+  parsed data is not modified. This lifts the two known limits v0.2.0 recorded for a
+  blank task calendar, in Check 3 and in DCMA-14.
+
+### Added
+
+- **`results['calendar_resolution']`**, always present. It lists which blank ids were
+  resolved and onto which calendar, and every activity with no usable calendar: a
+  blank id with nothing to fall back on, or a calendar the file does not declare,
+  which is reported and never replaced. `results['dcma_14']['calendar_resolution']`
+  carries the same block for the activities DCMA-14 assessed.
+- An activity with no usable calendar draws a High **Activity Calendar**
+  recommendation, a dashboard section listing every such activity, and DCMA-14's
+  `DCMA-Ext-TaskCalendar` warning, which stays outside the score. Where blank ids
+  were resolved, the dashboard header names the calendar they were scheduled on.
+
+### Changed
+
+- **The bundled parser is re-vendored** from `cpp-xer-parser` at `b5a2038`, which
+  adds `resolve_task_calendars`, `with_resolved_calendars` and
+  `calendar_resolution_block`. Its `validate_schedule` now also reports activity
+  calendars (BLOCK `XER-TASK-CALENDAR-UNRESOLVED`, INFO `XER-TASK-CALENDAR-FALLBACK`),
+  and `generate_summary` converts float on the resolved calendar. A file whose TASK
+  rows carry no calendar, and which names no project or default calendar, now draws
+  that BLOCK, and `aace_31r_compliance` scores it accordingly. `XER_PIN` and
+  `XER_SHA256` move together.
+- `dcma14.py` no longer carries the stand-in resolver it used while the bundled parser
+  had none, so the `calendar_resolution` block no longer has the `note` key that
+  stand-in added. The `work_day_delta` stand-in stays.
+- **Tests:** 16 new, all synthetic. `test_blank_task_calendar_2026_09_29.py` covers
+  Checks 1, 3, 5 and 7, the disclosure and the dashboard, and
+  `test_dcma14_blank_task_calendar_2026_09_26.py` covers DCMA-14. The suite is 181
+  tests.
+
+---
+
 ## v0.2.0 — 2026-09-29
 
 The first release since v0.1.0: corrections to the build, to public claims, to the
