@@ -39,10 +39,10 @@ later end is work finishing after the completion milestone, the milestone is
 the open end and the reader sees both. An activity the file stores no early
 finish for cannot be placed, so it is not excused. A file with no network
 finish to read (no activity tied to other work stores an early finish) keeps
-the rule as it was. Logic continuity (Check 8) traces from Check 3's
-terminals, so it is checked against the new rule here. This repository's
-DCMA-14 #1 still exempts every finish milestone from its missing-successor
-count by type, so no agreement test with it is carried.
+the rule as it was. DCMA-14 #1 exempts a finish milestone from its
+missing-successor count by the same kind of position test, and logic
+continuity (Check 8) traces from Check 3's terminals, so both are checked
+against the new rule here.
 
 The fixture is a neutral seven-activity chain on a five-day calendar, its
 dates, floats and driving flags worked through by hand from P6's scheduling
@@ -470,7 +470,7 @@ def test_the_scheduled_finish_day_still_counts_as_before():
                       and 'NO PREDECESSORS' in x['finding']}
 
 
-# ─────────────────────────────────────────── logic continuity reads it the same
+# ─────────────────────────── logic continuity and DCMA-14 #1 read it the same
 
 def test_logic_continuity_reads_an_early_dead_end_as_disconnected():
     # a start milestone signs off the footings and leads nowhere. Logic
@@ -494,6 +494,20 @@ def test_logic_continuity_reads_an_early_dead_end_as_disconnected():
     assert lc['rating'] == RATING_RED
     # every terminal is still a completion anchor
     assert set(_terminals(r)) <= set(lc['completion_anchors'])
+
+
+def test_dcma_logic_exempts_the_same_finish_milestones():
+    # DCMA-14 #1 exempts a finish milestone from the missing-successor count
+    # only where it finishes the network; Check 3 now agrees on both
+    rels = _RELS + [('170', '160', 'PR_FS', 0)]
+    r = _p6_form(_finish_milestone_rows(_CONTRACT_DATE), rels)
+    missing_succ = set(
+        r['dcma_14']['per_check']['DCMA-01-Logic']['details']['missing_succ'])
+    finish_milestones = {'F130', 'F170'}
+    terminals = set(_terminals(r))
+    assert terminals & finish_milestones == {'F170'}
+    assert missing_succ & finish_milestones == {'F130'}
+    assert _no_successor_findings(r) == ['F130']
 
 
 # ───────────────────────────────────────────────────── the engine is optional
