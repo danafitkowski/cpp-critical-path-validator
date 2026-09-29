@@ -4,13 +4,17 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
-## Unreleased
+## v0.2.0 — 2026-09-29
 
-Changes on `main` since the v0.1.0 tag: corrections to the build, to public claims,
-to the bundled parser's output, to how Checks 3 and 8 find where the project
-finishes, and to the DCMA-14 assessment, which now follows the published numbering
-and scores only what it measured. No logic-health check has been added; the Critical
-Path Test, DCMA #12, is now assessed where the file decides it.
+The first release since v0.1.0: corrections to the build, to public claims, to the
+bundled parser's output, to how Checks 3 and 8 find where the project finishes, and to
+the DCMA-14 assessment, which now follows the published numbering and scores only what
+it measured. No logic-health check has been added; the Critical Path Test, DCMA #12,
+is now assessed where the file decides it.
+
+**Breaking for DCMA-14 callers:** the `per_check` ids from #11 on, the meaning of
+`dcma_score`, the key BEI is reported under (`DCMA-14-BEI`, no longer `BEI`) and the
+CPLI detail keys all changed. See the first entries under Changed.
 
 ### Fixed
 
