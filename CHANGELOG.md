@@ -38,6 +38,52 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
   `tests/test_dcma14_finish_first_calendar_2026_09_29.py` has 5 tests on synthetic
   calendars; 4 of them fail against the previous parser, and CI runs the file under
   pytest and directly. The suite is 189 tests.
+- **A schedule with a logic cycle grades RED.** A cycle (A1 → A2 → … → A1) leaves the
+  network with no forward pass, no finish date and no critical path. The nine checks
+  read the stored float, constraints and relationships and never tested that the
+  network is acyclic, so a cyclic schedule was scored like any other: a five-activity
+  ring at zero float scored 96.3, GREEN, High Confidence. `validate_critical_path` now looks
+  for cycles before the checks run (Kahn's algorithm on the relationships between work
+  activities, whatever their type) and, where it finds one, sets the score to 0, the
+  rating to RED and the confidence to Unreliable, and adds a Critical **Network
+  Cycle** recommendation naming the first cycle found. The checks still run.
+- **Check 2 is RED when the schedule has no critical path.** With no activity at zero
+  or negative total float, Check 2 (constraint-driven criticality) cannot be assessed,
+  and it fell through to its "none of the critical path is constrained" branch: GREEN,
+  100. It is now RED, 0, and its note says a schedule with no critical path is a logic
+  defect to look into (a cycle, missing logic, or float everywhere). A chain with 50
+  days of float on every incomplete activity scored 93.6, GREEN, High Confidence,
+  although Check 1 already rated it RED for having no critical path; it now scores
+  76.6, AMBER, Moderate Confidence.
+- **A RED check caps the overall rating.** The overall score is a weighted average, so
+  a single RED check could sit under a GREEN, High Confidence headline: a chain whose
+  start milestone is an open end on the critical path (Check 3 RED) scored 82.3 and
+  read GREEN. Any RED check now caps the rating at AMBER and the confidence at Moderate
+  Confidence. The score itself is not changed, and the two bands below 60 are already
+  at or under the cap.
+- **Check 5 converts a lag on the calendar P6 measures it on.** P6 walks a lag on the
+  calendar that `SCHEDOPTIONS.sched_calendar_on_relationship_lag` names, the
+  predecessor's by P6's default (and when the table is absent or the field blank).
+  Check 5 always divided lag hours by the successor's hours per day, so where the two
+  activities sit on different calendars a lag read in the wrong working days: -40 h
+  from a 10 h/day predecessor to an 8 h/day successor read -5.0 days instead of -4.0,
+  and whether a lag counts as excessive (over 10 days) could flip. Check 5 now reads
+  the setting for the selected project (else the table's first row), converts on that
+  activity's calendar, and falls back to the other activity's, then to 8 h/day, as
+  before. A token cpp-cpm-engine does not walk a lag on (the project or the 24-hour
+  calendar) falls back to the successor's, as the engine does.
+
+  These four rules are ported from CPP's internal validator: the cycle detection and
+  override, the Check 2 branch, the cap and Check 5's conversion are AST-identical to
+  it. The SCHEDOPTIONS reader is a reduced copy of its decode that reads the lag
+  setting only; the token resolver in it is AST-identical.
+  `tests/test_network_cycle_2026_09_29.py` (5 tests) and
+  `tests/test_scoring_rules_and_lag_calendar_2026_09_29.py` (12 tests), all synthetic,
+  run under pytest and directly in CI. Against the previous code 4 of the 5 cycle tests
+  fail; the scoring file cannot import the new SCHEDOPTIONS reader, and with the reader
+  shimmed in 7 of its 12 tests fail. 17 mutants of the four rules are each killed. The
+  suite is 206 tests. Not ported: the internal version's `dcma_worst_severity`, which
+  needs a report summary the bundled `validation.py` does not produce.
 - **The README's examples run, and it says what the public engine does.** Three of the
   README's four Python examples raised when run. The quick start printed
   `results['cp_confidence_score']` and `results['cp_confidence_band']`, keys
@@ -86,6 +132,17 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ### Added
 
+- **`results['cycle_detected']`, `results['cycles_found']` and
+  `results['cycles_found_task_ids']`**, always present: whether the relationships
+  contain a cycle, and one closed chain per cycle found, as activity codes and as task
+  ids. Where any check is RED, **`results['overall_rating_capped_by_red']`** (`True`)
+  and **`results['red_checks']`** (the RED checks' keys) say the headline was capped.
+- **`results['schedule_options']`**, always present: the relationship-lag calendar
+  Check 5 converted on (`relationship_lag_calendar`, the SCHEDOPTIONS token or P6's
+  default), `lag_calendar_role` (`predecessor` or `successor`) and
+  `relationship_lag_calendar_source`, which says how it was determined. The keys are
+  the ones CPP's internal validator reports under the same name; its scheduling-mode
+  and Must Finish By keys are not read here.
 - **`results['calendar_resolution']`**, always present. It lists which blank ids were
   resolved and onto which calendar, and every activity with no usable calendar: a
   blank id with nothing to fall back on, or a calendar the file does not declare,

@@ -228,6 +228,21 @@ rounds up to a band's lower edge stays in the band below it.
 | 40 to under 60 | `Low Confidence`      | `AMBER`          | CP needs significant corrections.                  |
 | under 40       | `Unreliable`          | `RED`            | CP is artificial; do not rely on it for planning.  |
 
+Two rules sit on top of the bands:
+
+- **A logic cycle.** A schedule whose relationships loop back on themselves has no
+  forward pass and no critical path, whatever its stored float says. The validator
+  looks for cycles before any check runs. Where it finds one, `results['cycle_detected']`
+  is `True`, `results['cycles_found']` lists the cycles found, each as a closed chain
+  of activity codes (`cycles_found_task_ids` as task ids), the score is 0, the band `Unreliable`
+  and the rating `RED`, and a Critical "Network Cycle" recommendation names a cycle to
+  break. The nine checks still run, for triage.
+- **A RED check caps the headline.** The score is a weighted average, so one RED check
+  can sit under a GREEN average. Where any check is RED, the rating cannot be `GREEN`
+  (it reads `AMBER`) and `High Confidence` reads `Moderate Confidence`. The score is
+  left as computed; `results['overall_rating_capped_by_red']` is `True` and
+  `results['red_checks']` names the RED checks. The two bands below 60 are unchanged.
+
 ---
 
 ## AACE alignment

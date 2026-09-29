@@ -139,7 +139,7 @@ def test_excessive_lag_threshold_respects_calendar():
 
 
 def test_no_calendar_falls_back_to_8hr_default():
-    """If the successor's calendar isn't in cal_map, fall back to 8hr default."""
+    """If the lag's calendar isn't in cal_map, fall back to 8hr default."""
     # Build data where task references a non-existent clndr_id
     data = _build_data(lag_hrs=-40, hours_per_day=8.0)
     # Point the tasks' clndr_id at a calendar that doesn't exist

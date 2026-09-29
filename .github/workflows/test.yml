@@ -67,6 +67,8 @@ jobs:
           python tests/test_blank_task_calendar_2026_09_29.py
           python tests/test_readme_examples.py
           python tests/test_dcma14_finish_first_calendar_2026_09_29.py
+          python tests/test_network_cycle_2026_09_29.py
+          python tests/test_scoring_rules_and_lag_calendar_2026_09_29.py
 
       # The vendored parser is checked against a PINNED upstream commit rather
       # than against `main`, and the hard check is offline.
