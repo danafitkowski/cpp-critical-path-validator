@@ -1719,10 +1719,11 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     # ── The embedded DCMA-14 worst severity, at the top level ──────────
     # The headline (overall_rating, scope-labelled above) grades logic
     # health, but the embedded DCMA-14 report can independently say BLOCK,
-    # for example on an actual date past the data date. That BLOCK sat at
-    # results['dcma_14']['report']['summary']['worst_severity'], where a
-    # reader scanning the headline would not see it beside a GREEN
-    # logic-health rating. It is lifted to results['dcma_worst_severity'].
+    # for example on an actual date past the data date. That BLOCK is in the
+    # report's summary, results['dcma_14']['report']['summary']
+    # ['worst_severity'], where a reader scanning the headline would not see
+    # it beside a GREEN logic-health rating, so it is lifted to
+    # results['dcma_worst_severity'].
     #
     # This is a read-up of the DCMA-14 report's summary, not a re-derivation:
     # it does not change the logic-health score or the RED-check cap, and the
