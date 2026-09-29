@@ -15,6 +15,7 @@ Thank you for considering a contribution. These checks come out of court-filed f
    python tests/test_open_ends_terminal_position_2026_09_28.py
    python tests/test_bundled_validation_runs.py
    python tests/test_dcma14_logic.py
+   python tests/test_open_ends_floating_finish_2026_09_28.py
    ```
    Or with pytest:
    ```bash
