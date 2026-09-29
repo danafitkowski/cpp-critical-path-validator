@@ -12,6 +12,15 @@ The four severity sentinels (BLOCK / WARN / INFO / PASS) are plain strings —
 matching the public-API contract of the full version — so any code that
 imports them, compares against them, or includes them in serialized output
 will behave identically.
+
+`ValidationReport.to_dict()` carries the full version's `summary` block: the
+number of findings at each severity, the total, and `worst_severity`, the
+worst severity present (BLOCK > WARN > INFO > PASS; PASS for an empty
+report). A caller that reads `to_dict()['summary']['worst_severity']` gets
+the same answer from either version. Two differences remain, both kept so
+that output this subset already produced does not move: `to_dict()` also
+carries this subset's `counts` key, and it lists findings in the order they
+were added, where the full version sorts them worst first.
 """
 
 from dataclasses import dataclass, field
@@ -28,6 +37,10 @@ INFO  = 'INFO'    # Informational note. No corrective action implied.
 PASS  = 'PASS'    # Check passed. No finding to report.
 
 _VALID_SEVERITIES = (BLOCK, WARN, INFO, PASS)
+
+# Rank of each severity, worst highest. `ValidationReport.worst_severity`
+# reads the worst finding by this order.
+_SEVERITY_ORDER = {BLOCK: 3, WARN: 2, INFO: 1, PASS: 0}
 
 
 @dataclass
@@ -88,15 +101,27 @@ class ValidationReport:
         """Return findings filtered to one severity level."""
         return [f for f in self.findings if f.severity == severity]
 
-    def count(self, severity: str) -> int:
-        """Return the number of findings at one severity level.
+    def count(self, severity=None):
+        """Return the number of findings at one severity level, or the
+        number of all findings when no severity is given.
 
         Carried alongside `counts()` because callers use both shapes:
         `xer_parser.aace_31r_compliance` scores a schedule by calling
         `count(BLOCK)` and `count(WARN)` directly, so a subset without this
         method makes that function raise AttributeError on a plain clone.
+        `count()` with no argument is the `total` in `to_dict()['summary']`,
+        as in the full version.
         """
+        if severity is None:
+            return len(self.findings)
         return sum(1 for f in self.findings if f.severity == severity)
+
+    @property
+    def worst_severity(self):
+        """Highest severity present, or PASS if none."""
+        if not self.findings:
+            return PASS
+        return max(self.findings, key=lambda f: _SEVERITY_ORDER[f.severity]).severity
 
     def counts(self) -> Dict[str, int]:
         """Return a dict of severity → count over all findings."""
@@ -110,9 +135,24 @@ class ValidationReport:
         return any(f.severity == BLOCK for f in self.findings)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Return the report as a JSON-safe dict.
+
+        `summary` has the full version's keys and values: the count at each
+        severity, `total`, and `worst_severity`. `findings` are in the order
+        they were added (the full version sorts them worst first), and
+        `counts` is kept for callers of earlier releases.
+        """
         return {
             'subject': self.subject,
             'context': dict(self.context),
+            'summary': {
+                'block': self.count(BLOCK),
+                'warn': self.count(WARN),
+                'info': self.count(INFO),
+                'pass': self.count(PASS),
+                'total': self.count(),
+                'worst_severity': self.worst_severity,
+            },
             'findings': [f.to_dict() for f in self.findings],
             'counts': self.counts(),
         }

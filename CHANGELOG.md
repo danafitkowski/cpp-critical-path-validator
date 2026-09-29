@@ -4,6 +4,56 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## Unreleased
+
+The validator gives the embedded DCMA-14 report's worst severity at the top level of its
+results, beside a headline now labelled as logic health, as CPP's internal validator
+does. The bundled parser files are `cpp-xer-parser` v0.2.1's, whose report carries the
+summary this reads. No existing result moves: the change adds keys and a dashboard line.
+
+### Added
+
+- **`results['dcma_worst_severity']`**, always present: the worst severity in the
+  embedded DCMA-14 report (`BLOCK`, `WARN`, `INFO` or `PASS`), read from its summary, or
+  `None` where DCMA-14 did not run. Where it ran,
+  **`results['dcma_blocks_despite_logic_rating']`** is `True` when that severity is
+  `BLOCK`. The headline score, rating and confidence grade logic health from the nine
+  checks, and the DCMA-14 report can say BLOCK on its own, for example for an actual
+  start after the data date (#9). That BLOCK was only in the embedded report's findings,
+  and the bundled `validation.py` gave the report no summary to read it from. On a
+  four-activity chain whose first task has an actual start two months past the data
+  date, the headline reads 96.3, GREEN, High Confidence, and `dcma_worst_severity` now
+  reads BLOCK. It is a read-up, not a re-derivation: the score, the RED-check cap and the
+  embedded report are unchanged.
+- **`results['overall_rating_scope']`** (`'logic_health'`) and
+  **`results['overall_rating_label']`** (`'Logic Health'`), always present, say what the
+  headline grades, so that it is not read as a DCMA-14 verdict.
+- The dashboard shows the DCMA-14 recommendation under the gauge (Must Fix, Warn, Info or
+  Pass) and, for Must Fix, says the score grades logic health only. Nothing is shown when
+  DCMA-14 did not run.
+
+  The new keys and the read-up are AST-identical to CPP's internal validator; the
+  dashboard line is this repository's own, as the two dashboards differ. The v0.3.0
+  entry that said `dcma_worst_severity` was not ported now says this release ports it.
+  `tests/test_dcma_worst_severity_2026_09_29.py` has 12 synthetic tests. Against v0.3.0,
+  9 of them fail; with the new validator but v0.3.0's `validation.py`, 7 fail. Of 11
+  mutants of the port, 10 are killed. The survivor drops a guard against a summary with
+  no worst severity, which the bundled report cannot produce: an empty report's is PASS.
+  CI runs the file under pytest and directly. The suite is 218 tests.
+
+### Changed
+
+- **The bundled parser files are re-vendored** from `cpp-xer-parser` at its release
+  [`v0.2.1`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.2.1),
+  commit `ca39d88`. `validation.py` gains the report `summary` (the count at each
+  severity, the total and `worst_severity`), the `worst_severity` property and `count()`
+  with no argument; nothing it produced before moves. `xer_parser.py` and
+  `config_profiles.py` are byte-identical to v0.2.0's, so `XER_SHA256` is unchanged and
+  `XER_PIN` moves to the new commit. The README names the release and says the two
+  support files come from it too.
+
+---
+
 ## v0.3.0 — 2026-09-29
 
 The second release of the day. A blank activity calendar id is read as the project
@@ -105,8 +155,9 @@ New keys are listed under Added.
   run under pytest and directly in CI. Against the previous code 4 of the 5 cycle tests
   fail; the scoring file cannot import the new SCHEDOPTIONS reader, and with the reader
   shimmed in 7 of its 12 tests fail. 17 mutants of the four rules are each killed. The
-  suite is 206 tests. Not ported: the internal version's `dcma_worst_severity`, which
-  needs a report summary the bundled `validation.py` does not produce.
+  suite is 206 tests. Not ported in this release: the internal version's
+  `dcma_worst_severity`, which needs a report summary the bundled `validation.py` did not
+  produce. v0.3.1 ports it.
 - **The README's examples run, and it says what the public engine does.** Three of the
   README's four Python examples raised when run. The quick start printed
   `results['cp_confidence_score']` and `results['cp_confidence_band']`, keys

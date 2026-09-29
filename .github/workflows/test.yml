@@ -14,7 +14,7 @@ jobs:
       # The upstream commit scripts/xer_parser.py is vendored from, and the
       # SHA-256 of that file. Re-vendoring is a two-line change: bump both
       # together, and the checks below do the rest.
-      XER_PIN: 33e8063e9b0d912ae425edd1c38802116ee9d951
+      XER_PIN: ca39d88559e2c7a5ee5ab0b4c570d233ba097389
       XER_SHA256: 78ce6fee1d37f0d0828b8cb9dae83da30c04d01cb31b54421589d82436c80dc1
       # The cpp-cpm-engine commit the tests run against. Check 3's working-day
       # test calls two functions private to the engine, so the engine is
@@ -69,6 +69,7 @@ jobs:
           python tests/test_dcma14_finish_first_calendar_2026_09_29.py
           python tests/test_network_cycle_2026_09_29.py
           python tests/test_scoring_rules_and_lag_calendar_2026_09_29.py
+          python tests/test_dcma_worst_severity_2026_09_29.py
 
       # The vendored parser is checked against a PINNED upstream commit rather
       # than against `main`, and the hard check is offline.
