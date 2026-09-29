@@ -17,10 +17,11 @@ never counted.
 The check now counts incomplete activities only. A start milestone with no
 predecessor is excused only at or before the earliest start of all the work,
 where it starts the network; a finish milestone with no successor only at or
-after the latest finish of all the work, where it ends it. Each activity is
-placed by its actual date, else its early date, else its planned date, and
-completed work counts in placing the network's start and finish. A finish
-milestone always needs a predecessor. The missing-predecessor and
+after the latest finish of the remaining work, where it ends it. Each activity
+is placed by its actual date, else its early date, else its planned date.
+Completed work counts in placing the network's start, never its finish, so an
+update statused past its data date is #9's finding and not a dangling end. A
+finish milestone always needs a predecessor. The missing-predecessor and
 missing-successor counts are reported separately; the graded value is still
 their union, the rate the threshold is stated against.
 
@@ -237,9 +238,8 @@ def test_logic_takes_the_network_start_from_all_the_work():
     Here the project started in March, and a milestone that resumes the work
     has no predecessor: it must be counted.
 
-    The finish anchor is taken over the same set, but on a schedule
-    rescheduled to its data date no completed activity finishes after the
-    remaining work, so no sound fixture tells the two apart there.
+    The finish anchor is taken over the remaining work instead; see
+    test_logic_takes_the_network_finish_from_the_remaining_work.
     """
     tasks, preds = _chain()
     for t in tasks:
@@ -317,9 +317,9 @@ def test_logic_places_completed_work_by_its_actual_dates():
     milestone at the data date with no predecessor would be excused. Here the
     start milestone was finished in March: the network starts there.
 
-    _task_finish reads in the same order, but a completed activity's stamp and
-    its actual finish both fall at or before the data date, and the remaining
-    work finishes after it, so no sound fixture tells the two apart there.
+    _task_finish reads in the same order, but only the remaining work feeds
+    the finish anchor and the finish test, and an incomplete activity carries
+    no actual finish, so the order does not arise there.
     """
     data_date = '2026-04-27 08:00'
     tasks, preds = _chain()
@@ -340,6 +340,45 @@ def test_logic_places_completed_work_by_its_actual_dates():
         f'the start milestone finished in March, so the milestone that resumes '
         f'the work at the data date is a dangling start; '
         f'missing_pred={det["missing_pred"]}')
+
+
+def test_logic_takes_the_network_finish_from_the_remaining_work():
+    """The network finishes where the remaining work finishes. A completed
+    activity's finish never moves it.
+
+    DEFECT (2026-09-29): the finish anchor was taken over the whole work set,
+    completed activities included. On a schedule rescheduled to its data date
+    that changes nothing, because no completed activity finishes after the
+    remaining work. On an update statused past its data date it does: an
+    actual finish later than the remaining work's early finish (#9 reports
+    it) moved the network finish past the completion milestone, and the
+    milestone was counted as a dangling end. Here the data date is 10 April,
+    Alpha finished on the 22nd, and the remaining work still runs to the
+    17th: the completion milestone is where the network finishes, and #9,
+    not #1, holds the finding.
+    """
+    data_date = '2026-04-10 08:00'
+    tasks, preds = _chain()
+    for t in tasks:
+        if t['task_code'] == 'A00':
+            t.update(status_code='TK_Complete', act_start_date='2026-03-02 08:00',
+                     act_end_date='2026-03-02 08:00')
+        if t['task_code'] == 'A10':
+            t.update(status_code='TK_Complete', remain_drtn_hr_cnt='0',
+                     act_start_date='2026-04-13 08:00', act_end_date='2026-04-22 16:00')
+        if t['task_code'] == 'A20':
+            t.update(early_start_date='2026-04-13 08:00', early_end_date='2026-04-17 16:00')
+        if t['task_code'] == 'A30':
+            t.update(early_start_date='2026-04-17 16:00', early_end_date='2026-04-17 16:00')
+    result = dcma_14_assess(_schedule(tasks, preds, data_date=data_date),
+                            profile='commercial')
+    det = result['per_check']['DCMA-01-Logic']['details']
+    assert det['missing_succ'] == [], (
+        f'the completion milestone ends the remaining work, so an actual finish '
+        f'past the data date must not make it a dangling end; '
+        f'missing_succ={det["missing_succ"]}')
+    assert result['per_check']['DCMA-09-InvalidDates']['severity'] == 'BLOCK', (
+        'the actual finish after the data date is #9\'s finding')
 
 
 def test_logic_details_carry_every_key_when_no_work_is_incomplete():
