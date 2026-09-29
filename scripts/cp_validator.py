@@ -233,11 +233,19 @@ def _finishes_with(task, finish, cal_map, helpers):
 def _engine_date_helpers():
     """The engine's day arithmetic for _finishes_with, from cpp-cpm-engine's
     `cpm` module when it is on the path (as Check 2's LPM cross-check takes
-    it), or None when it is not: callers then compare days only."""
+    it), or None when it is not: callers then compare days only.
+
+    The two functions are private to the engine, so they are called once here
+    the way _finishes_with calls them. An engine without them, or with other
+    signatures, then leaves Check 3 on the same-day test instead of raising in
+    the middle of a validation."""
     try:
         import cpm
-        return {'instant_of': cpm._instant_of, 'snap_fwd': cpm._snap_fwd}
-    except Exception:  # pragma: no cover - the engine is optional
+        helpers = {'instant_of': cpm._instant_of, 'snap_fwd': cpm._snap_fwd}
+        helpers['snap_fwd'](helpers['instant_of']('2027-01-01 17:00'), None,
+                            alerts=[], ctx='terminal')
+        return helpers
+    except Exception:
         return None
 
 
@@ -1398,6 +1406,13 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             'narratives': [],
             'manifest': {},
         }
+
+    # Which finish test CHECK 3 ran. 'working-day' needs cpp-cpm-engine's day
+    # arithmetic (_engine_date_helpers): a finish at one working day's close
+    # and one at the next working day's opening are the same instant.
+    # Without it only the same day counts ('same-day').
+    results['checks']['open_ends_cp']['finish_match'] = (
+        'working-day' if _engine_date_helpers() is not None else 'same-day')
 
     return results
 

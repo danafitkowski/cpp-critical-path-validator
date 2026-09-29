@@ -240,9 +240,9 @@ All tests build their XER fixtures synthetically in memory; no real client XER f
 
 CP validation is the first thing Critical Path Partners runs on a new XER, checking whether the CP is real before any forensic delay analysis, time impact analysis, or claims-package work begins. That job is done by the internal validator described under [Scope and status](#scope-and-status); this repository publishes its nine-check core so anyone can run the same audit.
 
-When `cpp-cpm-engine` is on the same `sys.path`, the validator's Check 2 also runs an LPM-confirmed-false-CP detection that cross-validates the schedule's reported critical path against an independently-computed LPM result.
+When `cpp-cpm-engine` is on the same `sys.path`, the validator's Check 2 also runs an LPM-confirmed-false-CP detection that cross-validates the schedule's reported critical path against an independently-computed LPM result, and Check 3 uses the engine's working-day arithmetic to decide which activities finish with the network: a finish at one working day's close and one at the next working day's opening count as the same instant on the activity's calendar.
 
-When the engine is not available, the validator gracefully degrades (Check 2 still runs the constraint-driven analysis; the LPM cross-check is skipped).
+When the engine is not available, the validator gracefully degrades: Check 2 still runs the constraint-driven analysis and skips the LPM cross-check, and Check 3 matches finishes by day only. `checks.open_ends_cp.finish_match` says which of the two Check 3 ran (`working-day` or `same-day`). CI runs against the engine commit recorded as `CPM_ENGINE_PIN` in `.github/workflows/test.yml`.
 
 ---
 

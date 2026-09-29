@@ -16,6 +16,11 @@ jobs:
       # together, and the checks below do the rest.
       XER_PIN: a8edac6f2ef19f6cddb02dee51dc320f99f6ba38
       XER_SHA256: 96edf66b18819e556f891a2a11e3a50240808506ffda32ad3644effe34fa1796
+      # The cpp-cpm-engine commit the tests run against. Check 3's working-day
+      # test calls two functions private to the engine, so the engine is
+      # pinned for the same reason the parser is: an upstream change must not
+      # change this build. Bump it by hand after checking the tests.
+      CPM_ENGINE_PIN: 36de20073c54cba3926638f47b094f49fd64179e
     strategy:
       fail-fast: false
       matrix:
@@ -31,10 +36,12 @@ jobs:
       - name: Install pytest
         run: python -m pip install --upgrade pip pytest
 
-      - name: Clone cpp-cpm-engine (for LPM cross-check)
+      - name: Fetch cpp-cpm-engine at its pin (Check 2 LPM cross-check, Check 3 working-day test)
         shell: bash
         run: |
-          git clone --depth 1 https://github.com/danafitkowski/cpp-cpm-engine "$RUNNER_TEMP/cpp-cpm-engine"
+          git init -q "$RUNNER_TEMP/cpp-cpm-engine"
+          git -C "$RUNNER_TEMP/cpp-cpm-engine" fetch -q --depth 1 https://github.com/danafitkowski/cpp-cpm-engine "$CPM_ENGINE_PIN"
+          git -C "$RUNNER_TEMP/cpp-cpm-engine" checkout -q FETCH_HEAD
           echo "CPP_CPM_ENGINE_PATH=$RUNNER_TEMP/cpp-cpm-engine/python_reference" >> "$GITHUB_ENV"
 
       - name: Run unit tests (pytest)

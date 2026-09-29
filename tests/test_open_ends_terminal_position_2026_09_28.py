@@ -474,8 +474,9 @@ def test_the_scheduled_finish_day_still_counts_as_before():
 
 def test_logic_continuity_reads_an_early_dead_end_as_disconnected():
     # a start milestone signs off the footings and leads nowhere. Logic
-    # continuity traces from Check 3's terminals, so it used to count the
-    # sign-off as a completion and the inspection behind it as connected
+    # continuity traces from Check 3's terminals, so a sign-off taken as a
+    # terminal by its type would count as a completion and the inspection
+    # behind it as connected
     rows = [x for x in _rows() if x[1] != 'F130'] + [
         _row('125', 'F125', 'Inspect the footings', 8, '2027-03-08 08:00',
              '2027-03-08 17:00', '2027-03-08 08:00', '2027-03-08 17:00', 0),
@@ -493,6 +494,46 @@ def test_logic_continuity_reads_an_early_dead_end_as_disconnected():
     assert lc['rating'] == RATING_RED
     # every terminal is still a completion anchor
     assert set(_terminals(r)) <= set(lc['completion_anchors'])
+
+
+# ───────────────────────────────────────────────────── the engine is optional
+
+def _without_engine_day_arithmetic(fake_cpm, check):
+    """Run `check` with `fake_cpm` standing in for cpp-cpm-engine's module."""
+    saved = sys.modules.get('cpm')
+    sys.modules['cpm'] = fake_cpm
+    try:
+        check()
+    finally:
+        if saved is None:
+            sys.modules.pop('cpm', None)
+        else:
+            sys.modules['cpm'] = saved
+
+
+def test_an_engine_without_the_day_arithmetic_leaves_the_same_day_test():
+    # The day arithmetic is private to the engine, and the engine is
+    # optional. A module without it, or with other signatures, must leave
+    # Check 3 on the same-day test, say so, and not raise mid-validation.
+    import types
+    old = types.ModuleType('cpm')
+    old._instant_of = lambda dt_str: 1
+    old._snap_fwd = lambda num, calendar_info: num      # no alerts, no ctx
+
+    def check():
+        assert _engine_date_helpers() is None
+        r = _p6_form(_two_ends_rows(), _TWO_ENDS_RELS, scd_end='2027-03-29 08:00')
+        assert _open_ends(r)['finish_match'] == 'same-day'
+        # Friday's close is no longer matched with Monday's opening
+        assert _terminals(r) == ['F170']
+
+    for fake in (types.ModuleType('cpm'), old):
+        _without_engine_day_arithmetic(fake, check)
+
+
+def test_the_result_says_which_finish_test_ran():
+    expected = 'working-day' if _engine_date_helpers() is not None else 'same-day'
+    assert _open_ends(_ms_project_form())['finish_match'] == expected
 
 
 if __name__ == '__main__':

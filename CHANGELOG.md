@@ -35,13 +35,14 @@ finishes. No check has been added.
   The trace also starts from where the network ends: the incomplete activity or
   activities with the latest stored early finish among those tied to at least one
   other work activity, and the open ends reached from them through unfinished work.
-  Only linked work can set the finish, so an unlinked activity dated late no longer
-  takes the real finish's place. These anchors only add to the others, so a schedule
-  with a real finish milestone reads as before. The fallback to every finish milestone
-  still fires only when no finish milestone is critical, a critical gate included. An
-  activity with no logic can still anchor the trace as a finish milestone under that
-  fallback, or as a Check 3 terminal where it finishes with the network (see the next
-  entry), and Check 3 then reports its missing predecessor.
+  Only linked work can set the finish, so an unlinked activity dated late never sets
+  it. These anchors only add to the others, so a schedule with a real finish
+  milestone, and no work with logic finishing after it, reads as before. The fallback
+  to every finish milestone still fires only when no finish milestone is critical, a
+  critical gate included, and a critical finish milestone anchors the trace wherever
+  it sits, as before. An activity with no logic can still anchor the trace as a finish
+  milestone under that fallback, or as a Check 3 terminal where it finishes with the
+  network (see the next entry), and Check 3 then reports its missing predecessor.
 
   The one case that now reports more is a gate whose successors lead nowhere: the
   gate, and any work whose only way forward runs through it, had counted as connected
@@ -60,8 +61,6 @@ finishes. No check has been added.
   critical) a finish milestone well before the finish became the terminal, and the
   real last activity was reported as a critical open end. On P6 exports, Finish On or
   Before contract milestones with no successor were excused months before the finish.
-  With the fold-in above this matters to Check 8 too: a start milestone or unlinked
-  activity that was a terminal only by type would have anchored it.
 
   A critical activity with no successor is now the terminal only where it finishes
   with the network: on the day of the stored early finish of the activities that set
@@ -69,13 +68,26 @@ finishes. No check has been added.
   its own calendar, or on the project's scheduled finish day as before. An activity
   the file stores no early finish for cannot be placed and is not excused. A file with
   no network finish to read (no activity tied to other work stores an early finish)
-  keeps the old rule. A dead end before the finish, and the work that leads only to
-  it, now read as disconnected in Check 8, where Check 3 reports the open end.
+  keeps the old rule. Because Check 8 now takes Check 3's terminals as anchors, the
+  rule also decides what Check 8 anchors on: a start milestone or an unlinked activity
+  that leads nowhere before the finish is not taken as where the network ends.
 
-  The working-day test takes cpp-cpm-engine's `cpm` module when it is on the path, as
-  Check 2's LPM cross-check does. Without it only the same day counts, so an activity
-  that finishes at one working day's close is not matched with a network that
-  finishes at the next working day's opening, and is reported as an open end.
+  Known limits:
+  - The working-day test takes cpp-cpm-engine's `cpm` module when it is on the path,
+    as Check 2's LPM cross-check does, and `checks.open_ends_cp.finish_match` says
+    which test ran. Without the engine only the same day counts, so an activity that
+    finishes at one working day's close is not matched with a network that finishes
+    at the next working day's opening, and is reported as an open end.
+  - The bundled parser does not read a blank task calendar as the project calendar,
+    so an activity with no calendar of its own is compared without one, and its
+    Friday-evening finish is not matched with a Monday-morning one.
+  - A critical finish milestone with no successor before the finish is now reported
+    by Check 3, but it still anchors Check 8 as a finish milestone, so Check 8 does
+    not report the work that leads only to it.
+  - DCMA-14 #1 in this repository still exempts every finish milestone from its
+    missing-successor count, whatever its date. Check 3 and DCMA-14 #1 can therefore
+    name different activities: where the finish milestone comes before the activity
+    that ends the network, Check 3 reports the milestone and DCMA-14 #1 the activity.
 
 - **CI is green again.** The last four runs (2026-05-16, 2026-08-19, 2026-08-22 and
   2026-08-23) each failed on exactly one step, the `xer_parser.py` drift check, in
@@ -147,15 +159,21 @@ finishes. No check has been added.
   Check 3's terminals among the anchors. It counted the finish milestones the trace
   started from (every one when none was critical); gates are no longer counted, and
   Check 3's terminals now are.
-- **Check 3's missing-successor findings** end with a sentence naming where the
-  network finishes, for example `The network finishes at 'F160 - Hand over to the
-  owner' (2027-03-29 17:00).`
+- **Check 3's findings on critical activities with no successor** end with a sentence
+  naming where the network finishes, when the file has a network finish to read, for
+  example `The network finishes at 'F160 - Hand over to the owner' (2027-03-29 17:00).`
+- **CI fetches cpp-cpm-engine at a recorded commit** (`CPM_ENGINE_PIN` in
+  `.github/workflows/test.yml`) instead of its `main`, as it already pins the vendored
+  parser: Check 3's working-day test calls two functions private to the engine.
 
 ### Added
 
 - **`completion_anchors` and `gate_milestones` in Check 8's result**: the task codes
   the trace started from, and the As Late As Possible finish milestones set aside as
   gates.
+- **`finish_match` in Check 3's result**: `working-day` when cpp-cpm-engine's day
+  arithmetic was used to match finishes with the network, `same-day` when it was not
+  available.
 - **`tests/test_logic_continuity_completion_anchor_2026_09_28.py`**, 19 tests on
   synthetic data: the ALAP pattern, dated by hand from P6's scheduling rules, a
   dangling branch that is still reported, the gate under the every-finish-milestone
@@ -165,12 +183,13 @@ finishes. No check has been added.
   secondary constraint, no stored early dates, a tie from the last task to itself, and
   the trade-off above), and a chain with no early dates that ends in an ordinary task.
   CI runs it under pytest and directly.
-- **`tests/test_open_ends_terminal_position_2026_09_28.py`**, 17 tests on synthetic
+- **`tests/test_open_ends_terminal_position_2026_09_28.py`**, 19 tests on synthetic
   data: the early finish milestone and the contract milestone that used to be
   excused, the working-day match on the activity's own calendar, unlinked and undated
   activities, the finding text, the trade-off, a real finish milestone and a file with
-  no early dates that read as before, and Check 8 reading an early dead end as
-  disconnected. Two need cpp-cpm-engine's `cpm` module and are skipped without it.
+  no early dates that read as before, Check 8 not anchoring on a start milestone that
+  leads nowhere, an engine without the day arithmetic leaving the same-day test, and
+  `finish_match`. Two need cpp-cpm-engine's `cpm` module and are skipped without it.
   CI runs it under pytest and directly.
 - **A "Scope and status" section in the README**, recording that this is a public
   subset of a larger internal validator and recording the vendored parser's exact
