@@ -565,6 +565,19 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         'overall_score': 0,
         'overall_rating': RATING_RED,
         'overall_confidence': 'Unreliable',
+        # Scope label. overall_rating and overall_score grade LOGIC HEALTH
+        # only: the nine checks cover critical-path identification,
+        # constraints, open ends, relationships, lags, out-of-sequence
+        # progress, near-critical density, logic continuity and constraint
+        # saturation. They are not a DCMA-14 schedule-health verdict, and a
+        # GREEN logic-health rating must never be read as one while the
+        # embedded DCMA-14 report says BLOCK. The label is always present so
+        # a renderer can name the headline; dcma_worst_severity (set after
+        # the DCMA-14 block below) carries the embedded report's worst
+        # severity up to the top level beside it.
+        'overall_rating_scope': 'logic_health',
+        'overall_rating_label': 'Logic Health',
+        'dcma_worst_severity': None,
         # Cycle detection: always present, so callers need no default.
         'cycle_detected': cycle_detected,
         'cycles_found': cycles_found_codes,
@@ -1703,6 +1716,31 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             'error': f'DCMA 14 assessment unavailable: {type(e).__name__}: {e}',
         }
 
+    # ── The embedded DCMA-14 worst severity, at the top level ──────────
+    # The headline (overall_rating, scope-labelled above) grades logic
+    # health, but the embedded DCMA-14 report can independently say BLOCK,
+    # for example on an actual date past the data date. That BLOCK is in the
+    # report's summary, results['dcma_14']['report']['summary']
+    # ['worst_severity'], where a reader scanning the headline would not see
+    # it beside a GREEN logic-health rating, so it is lifted to
+    # results['dcma_worst_severity'].
+    #
+    # This is a read-up of the DCMA-14 report's summary, not a re-derivation:
+    # it does not change the logic-health score or the RED-check cap, and the
+    # embedded report stays the source. Where DCMA-14 did not run (an error
+    # block), dcma_worst_severity stays None and the flag is not set.
+    _dcma_report = results.get('dcma_14', {}).get('report')
+    if isinstance(_dcma_report, dict):
+        _summary = _dcma_report.get('summary')
+        if isinstance(_summary, dict) and _summary.get('worst_severity') is not None:
+            results['dcma_worst_severity'] = _summary['worst_severity']
+            # True when the embedded DCMA-14 raised a hard stop, whatever the
+            # logic-health headline reads. A renderer should never show the
+            # headline alone while this is True.
+            results['dcma_blocks_despite_logic_rating'] = (
+                _summary['worst_severity'] in ('BLOCK', 'RED')
+            )
+
     # ── DRIVER-CHAIN NARRATIVE (AACE 49R-06, "Longest Path") ──────────────────────
     # For each critical activity, walk driving predecessors back to project
     # start and emit a natural-language explanation. Reuses the (_lpm_acts,
@@ -2038,6 +2076,25 @@ def generate_dashboard(results, output_path):
         <text x="50" y="63" text-anchor="middle" fill="#94a3b8" font-size="5.5">{_escape(results['overall_confidence'])}</text>
     </svg>'''
 
+    # The embedded DCMA-14 report's worst severity, under the gauge. The gauge
+    # grades logic health only, so a DCMA-14 BLOCK is shown beside it rather
+    # than left in the scorecard further down. Nothing is shown when DCMA-14
+    # did not run.
+    dcma_sev_html = ''
+    _dcma_sev = results.get('dcma_worst_severity')
+    if _dcma_sev:
+        _sev_color = {'BLOCK': '#ef4444', 'WARN': '#f59e0b', 'INFO': '#3b82f6',
+                      'PASS': '#22c55e'}.get(_dcma_sev, '#6b7280')
+        _sev_text = {'BLOCK': 'Must Fix', 'WARN': 'Warn', 'INFO': 'Info',
+                     'PASS': 'Pass'}.get(_dcma_sev, _dcma_sev)
+        dcma_sev_html = (
+            '<div class="gauge-dcma">DCMA-14 recommendation: '
+            '<span style="color:%s; font-weight:700;">%s</span>%s</div>' % (
+                _sev_color, _escape(_sev_text),
+                ('. The score above grades logic health only; DCMA-14 found '
+                 'a condition to fix before relying on this schedule.')
+                if results.get('dcma_blocks_despite_logic_rating') else ''))
+
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2060,6 +2117,7 @@ def generate_dashboard(results, output_path):
     .gauge-container {{ text-align: center; margin-bottom: 32px; }}
     .gauge-svg {{ width: 220px; height: 150px; }}
     .gauge-label {{ color: #94a3b8; font-size: 0.85rem; margin-top: 4px; }}
+    .gauge-dcma {{ color: #cbd5e1; font-size: 0.85rem; margin-top: 6px; }}
 
     /* Check Cards */
     .checks-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; margin-bottom: 32px; }}
@@ -2135,6 +2193,7 @@ def generate_dashboard(results, output_path):
     <div class="gauge-container">
         {gauge_svg}
         <div class="gauge-label">CP Confidence Score</div>
+        {dcma_sev_html}
     </div>
 
     <!-- Check Results -->

@@ -3,7 +3,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![tests](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml)
-[![version: 0.3.0](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
+[![version: 0.3.1](https://img.shields.io/badge/version-0.3.1-blue.svg)](CHANGELOG.md)
 [![AACE: 49R--06](https://img.shields.io/badge/AACE-49R--06-orange.svg)](#aace-alignment)
 
 Critical path validation, logic health assessment, and optimization recommendations for Primavera P6 schedules — plus a full DCMA 14-Point Assessment.
@@ -16,11 +16,11 @@ Companion to [`cpp-cpm-engine`](https://github.com/danafitkowski/cpp-cpm-engine)
 
 ## Scope and status
 
-This is v0.3.0, and it is a public subset. Critical Path Partners maintains a larger internal validator; what this repository publishes is the nine-check core, the DCMA 14-Point assessment, the driving-path tracer and the HTML dashboard. It does not carry every check or output the internal version has.
+This is v0.3.1, and it is a public subset. Critical Path Partners maintains a larger internal validator; what this repository publishes is the nine-check core, the DCMA 14-Point assessment, the driving-path tracer and the HTML dashboard. It does not carry every check or output the internal version has.
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
-`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.2.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.2.0) (commit [`33e8063`](https://github.com/danafitkowski/cpp-xer-parser/commit/33e8063e9b0d912ae425edd1c38802116ee9d951)), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.2.1`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.2.1) (commit [`ca39d88`](https://github.com/danafitkowski/cpp-xer-parser/commit/ca39d88559e2c7a5ee5ab0b4c570d233ba097389)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too, so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 ---
 
@@ -89,6 +89,7 @@ generate_dashboard(results, 'cp_validation_report.html')
 # Or interrogate the results dict directly
 print(f"CP Confidence Score: {results['overall_score']}/100")
 print(f"CP Confidence Band:  {results['overall_confidence']} ({results['overall_rating']})")
+print(f"DCMA-14 worst:       {results['dcma_worst_severity']}")
 
 for check_name, check_data in results['checks'].items():
     print(f"  {check_name}: {check_data['rating']} — {check_data['note']}")
@@ -242,6 +243,15 @@ Two rules sit on top of the bands:
   (it reads `AMBER`) and `High Confidence` reads `Moderate Confidence`. The score is
   left as computed; `results['overall_rating_capped_by_red']` is `True` and
   `results['red_checks']` names the RED checks. The two bands below 60 are unchanged.
+
+The score grades logic health from the nine checks, and the results say so:
+`results['overall_rating_scope']` is `'logic_health'` and `results['overall_rating_label']`
+is `'Logic Health'`. It is not a DCMA-14 verdict. The DCMA-14 report embedded in the
+results (`results['dcma_14']`) can say BLOCK while the score reads GREEN, for example for
+an actual start after the data date, so its worst severity is also given at the top
+level: `results['dcma_worst_severity']` is `BLOCK`, `WARN`, `INFO` or `PASS`, or `None`
+where DCMA-14 did not run, and where it ran `results['dcma_blocks_despite_logic_rating']`
+is `True` for a BLOCK. The dashboard shows it under the gauge. Neither changes the score.
 
 ---
 
