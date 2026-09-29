@@ -43,8 +43,8 @@ _COMMERCIAL: Dict[str, object] = {
     'dcma_high_duration_max_pct':       5.0,
     'dcma_invalid_dates_max_count':     0,     # #9  Invalid Dates / Future Actuals
     'dcma_resources_min_pct':           80.0,  # #10 Resources
-    'dcma_missed_tasks_max_pct':        5.0,   # #13 Missed Tasks
-    'dcma_cpli_min':                    0.95,  # #14 CPLI
+    'dcma_missed_tasks_max_pct':        5.0,   # #11 Missed Tasks
+    'dcma_cpli_min':                    0.95,  # #13 CPLI
     'bei_min':                          0.95,  # BEI extension
 }
 
