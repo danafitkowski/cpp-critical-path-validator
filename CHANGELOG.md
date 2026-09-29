@@ -25,6 +25,33 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
   project's (`PROJECT.clndr_id`), else the calendar flagged `default_flag = 'Y'`. The
   parsed data is not modified. This lifts the two known limits v0.2.0 recorded for a
   blank task calendar, in Check 3 and in DCMA-14.
+- **The README's examples run, and it says what the public engine does.** Three of the
+  README's four Python examples raised when run. The quick start printed
+  `results['cp_confidence_score']` and `results['cp_confidence_band']`, keys
+  `validate_critical_path` does not return (`KeyError`). The score is `overall_score`,
+  the band `overall_confidence` and its colour `overall_rating`, and the CP Confidence
+  Score section now names all three. The custom-profile example passed a threshold
+  dict to `dcma_14_assess`, but the bundled `config_profiles.get_profile` looks a
+  profile up by name (`TypeError`). The example now picks a bundled profile by name,
+  and the text says how to add one. The driving-path tracer example read
+  `step['task_code']`, `step['total_float_days']` and `step['rel_type']`, but
+  `trace_driving_path` returns plain activity codes (`TypeError`). The example prints
+  the chain, and the section says what the tracer returns and where it stops.
+
+  The "Integration with the CPP forensic suite" section said that with
+  `cpp-cpm-engine` on the path, Check 2 also runs an LPM-confirmed false-critical-path
+  detection. That needs `compute_lpm`, which the public engine's
+  `python_reference/cpm.py` does not have (its header says it was stripped), so the
+  cross-check never runs from this repository and `checks.constraint_driven.lpm_error`
+  records the failed import. The driver-chain narrative needs a
+  `driver_chain_narrative` module this repository does not ship, so from this
+  repository `results['driver_chain_narrative']` is always an error block. The section
+  now says that Check 3's working-day finish test is the only thing that uses the
+  public engine, and names the two outputs that need code not published here. The CI
+  step that fetches the engine no longer names the LPM cross-check either. The tracer
+  section also says where the walk stops, including its 200-predecessor cap, and the
+  score bands say the band is set before the score is rounded. No validator code
+  changed.
 
 ### Added
 
@@ -37,6 +64,14 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
   recommendation, a dashboard section listing every such activity, and DCMA-14's
   `DCMA-Ext-TaskCalendar` warning, which stays outside the score. Where blank ids
   were resolved, the dashboard header names the calendar they were scheduled on.
+- **`tests/test_readme_examples.py`** runs every Python example in the README that
+  calls `validate_critical_path`, `dcma_14_assess` or `trace_driving_path`, in the
+  README's order and in one namespace, against a synthetic schedule written to a
+  temporary folder, and fails on any exception. It failed on the old README with the
+  three errors above. Two guards stop it passing on nothing: each of the three
+  functions must have an example, and every activity an example names must have a
+  driving chain in the fixture. CI runs it under pytest and directly. Three tests,
+  taking the suite from 181 to 184.
 
 ### Changed
 
