@@ -23,6 +23,7 @@ Usage:
 
 import sys
 import json
+import math
 import os
 import re
 from datetime import datetime, timedelta
@@ -126,7 +127,27 @@ __all__ = [
 # CONSTANTS
 # ─────────────────────────────────────────────
 
-# P6 24.12 canonical table order for XER generation
+# Generation order for writing an XER. This is the sequence `generate_xer` emits
+# tables in, and P6 imports it cleanly. It is NOT a canonical export order: there
+# is no such thing. The 166 genuine exports measured for
+# references/table-reference.md produced 38 distinct %T sequences, and the first
+# nine names below are only the most common of them, appearing in 28 of 166.
+# Definition tables such as UDFTYPE, MEMOTYPE and PCATTYPE routinely appear before
+# PROJECT in real files. Never parse on the assumption of any order: read every
+# %T block into a table map first, then resolve cross-references.
+#
+# Names below are %T headers. 29 of the 39 appear in the measured set; the other
+# 10 (TASKFIN, TRSRCFIN, TASKDOC, PROJDOCS, SHIFT, SHIFTPER, ACCOUNT, WBSMEMO,
+# PROJMEMO, RISK) are P6 catalogue names that appear in none of the 166 exports,
+# kept so a file carrying one lands in a sensible slot. Three tables that DO
+# appear in the measured set are absent from this list on purpose — NONWORK,
+# RSRCCURVDATA and WBSSTEP — and are written in the trailing "everything else"
+# pass, which is harmless because P6 imports on content, not order.
+#
+# The resource-code assignment table is RSRCRCAT. No measured export writes a
+# `RSRCCAT` header, so code keyed on that spelling never fires (corrected in
+# v0.2.0, along with the removal of a phantom `RISKTYPES` entry that
+# duplicated RISKTYPE and matches no P6 table).
 TABLE_ORDER = [
     'CURRTYPE', 'FINTMPL', 'OBS', 'PROJECT', 'CALENDAR',
     'SCHEDOPTIONS', 'PROJWBS', 'TASK', 'TASKPRED', 'TASKRSRC',
@@ -134,28 +155,50 @@ TABLE_ORDER = [
     'UDFTYPE', 'UDFVALUE', 'PROJPCAT', 'PCATTYPE', 'PCATVAL',
     'TASKFIN', 'TRSRCFIN', 'TASKDOC', 'PROJDOCS', 'ROLERATE',
     'ROLES', 'RSRCROLE', 'SHIFT', 'SHIFTPER', 'ACCOUNT',
-    'RCATTYPE', 'RCATVAL', 'RSRCCAT', 'MEMOTYPE', 'TASKMEMO',
-    'WBSMEMO', 'PROJMEMO', 'RISKTYPE', 'RISK', 'RISKTYPES'
+    'RCATTYPE', 'RCATVAL', 'RSRCRCAT', 'MEMOTYPE', 'TASKMEMO',
+    'WBSMEMO', 'PROJMEMO', 'RISKTYPE', 'RISK'
 ]
 
-# Known field counts per table, keyed by P6 schema family.
-# Observed from real exports — P6 added/removed fields across major versions,
-# so validation must be version-aware or warnings fire on every valid XER.
+# Known field counts per table, keyed by P6 major-version family.
+# P6 added and removed fields across major versions, so validation must be
+# version-aware or warnings fire on every valid XER.
 #
-# TODO(schema-truth): the values below (e.g. PROJECT=71, TASK=61 for the 22/23/24
-# family) disagree with SKILL.md §Field-counts which currently states 72 / 62.
-# We need a fresh canonical P6 24.12 export to verify which side is correct
-# before changing either; both have plausible historical lineage and guessing
-# would silently break field-count validation for every consumer. Until then,
-# leave this constant intact and remember the SKILL.md numbers may need to be
-# fixed there (NOT here).
+# MEASURED against the 166 genuine P6 exports behind
+# references/table-reference.md: ERMHDR 19.12 (3 files), 23.10 (4), 23.12 (109),
+# 24.12 (50). The 163 exports at 23.10 / 23.12 / 24.12 all read PROJECT=71,
+# PROJWBS=26, TASK=61, TASKPRED=11, SCHEDOPTIONS=25. No export gave a different
+# count for a table it carried. Not every export carries every table: PROJECT,
+# PROJWBS and TASK appear in 163 of 163, TASKPRED in 159, SCHEDOPTIONS in 140. A
+# missing SCHEDOPTIONS or TASKPRED is normal, not malformed. The 3 exports at
+# 19.12 read PROJECT=82, PROJWBS=27, TASK=66, TASKPRED=10, SCHEDOPTIONS=25,
+# matching the '19' entry on the three keys it carries.
+#
+# `crt_path_num` is field 61 of 61 in every one of those 163 exports, including
+# all 50 genuine 24.12 files. It is a standard member of the 61-field TASK layout,
+# not a 24.12 addition that takes TASK to 62. Do not version-gate it, and do not
+# raise the '24' entry to 62.
+#
+# NOT measured: no 22.x or 20.x export is in the measured set. The '22' and '20'
+# entries are extrapolations from their neighbours, kept only so a file at those
+# versions is checked rather than silently skipped. Do not quote them as measured,
+# and do not describe these counts as covering a "22.x / 23.x / 24.x family" —
+# the measured versions are 19.12, 23.10, 23.12 and 24.12.
+#
+# Counts are a sanity check, not a parsing contract. Field count and column order
+# vary inside a single version and between adjacent versions: RSRC appears with
+# both 28 and 31 fields at 23.12, 24.12 moves `rsrc_type` and `location_id` to the
+# end of the RSRC row, and TASKRSRC swaps `has_rsrchours` for `update_user` and
+# `update_date` at 24.12. Always index by name from the %F line, never by position.
 TABLE_FIELD_COUNTS_BY_VERSION = {
-    # P6 22.x / 23.x / 24.x share the same schema for these core tables
+    # Measured identical across 23.10, 23.12 and 24.12 (163 genuine exports).
     '24': {'PROJECT': 71, 'SCHEDOPTIONS': 25, 'PROJWBS': 26, 'TASK': 61, 'TASKPRED': 11},
     '23': {'PROJECT': 71, 'SCHEDOPTIONS': 25, 'PROJWBS': 26, 'TASK': 61, 'TASKPRED': 11},
+    # Unmeasured extrapolation — no 22.x export has been seen.
     '22': {'PROJECT': 71, 'SCHEDOPTIONS': 25, 'PROJWBS': 26, 'TASK': 61, 'TASKPRED': 11},
-    # P6 19.x / 20.x have a different schema (more fields on some tables,
-    # fewer on TASKPRED, no SCHEDOPTIONS in some variants).
+    # 19.12 is a different layout (more fields on PROJECT/PROJWBS/TASK, fewer on
+    # TASKPRED). '20' is an unmeasured extrapolation from it. Neither entry carries
+    # a PROJWBS or SCHEDOPTIONS key, so those two tables are not field-count-checked
+    # at these versions even though 19.12 measures PROJWBS=27 and SCHEDOPTIONS=25.
     '20': {'PROJECT': 82, 'TASK': 66, 'TASKPRED': 10},
     '19': {'PROJECT': 82, 'TASK': 66, 'TASKPRED': 10},
 }
@@ -380,7 +423,13 @@ def parse_xer(filepath, encoding=None):
 
             record = {}
             for i, field in enumerate(current_fields):
-                record[field] = values[i] if i < len(values) else ''
+                record[field] = values[i]
+            # Preserve cells beyond the declared fields under synthetic string
+            # keys rather than silently dropping them (never-truncate). Only
+            # fires on a malformed/hand-edited row with extra tabs; values stay
+            # strings (the passthrough contract).
+            for i in range(len(current_fields), len(values)):
+                record[f'__extra_{i}'] = values[i]
 
             result['tables'][current_table]['records'].append(record)
             continue
@@ -403,6 +452,24 @@ def get_fields(data, table_name):
 # ─────────────────────────────────────────────
 # CALENDAR PARSING
 # ─────────────────────────────────────────────
+
+# P6 writes a calendar time slot in either field order, and the order is a
+# property of the individual calendar, not of the export or the P6 version:
+#   (s|08:00|f|16:00)   start-first
+#   (f|12:00|s|08:00)   finish-first
+# Both orders occur inside one genuine P6 24.12 export (a start-first five-day
+# calendar beside a finish-first six-day calendar), so the order cannot be
+# decided from the export header. Hours may be 1 or 2 digits ('8:00').
+#
+# Accepting only start-first made every finish-first calendar decode to zero
+# working days, which the working-day helpers then replaced with a Mon-Fri
+# week, and filed every finish-first exception body as a holiday. Calendars
+# that hit include a genuine Mon-Sat six-day calendar and a seven-day
+# continuous calendar.
+_TIME_SLOT_RE = re.compile(
+    r'\((?:s\|\d{1,2}:\d{2}\|f|f\|\d{1,2}:\d{2}\|s)\|\d{1,2}:\d{2}\)'
+)
+
 
 def parse_calendar_data(clndr_data_str):
     """
@@ -488,9 +555,9 @@ def parse_calendar_data(clndr_data_str):
                         break
                 j += 1
             day_body = dow_block[start:j]
-            # A day is a work day iff it contains at least one time slot `(s|...|f|...)`.
-            # P6 emits times as either `08:00` or `8:00` — accept 1 or 2 digit hour.
-            if re.search(r'\(s\|\d{1,2}:\d{2}\|f\|\d{1,2}:\d{2}\)', day_body):
+            # A day is a work day iff it contains at least one time slot, in
+            # either P6 field order — see _TIME_SLOT_RE.
+            if _TIME_SLOT_RE.search(day_body):
                 day_idx = day_num - 1
                 if 0 <= day_idx <= 6:
                     result['work_days'].append(day_idx)
@@ -560,10 +627,12 @@ def parse_calendar_data(clndr_data_str):
                             break
                     k += 1
             body_text = exc_block[body_start:body_end] if body_end > body_start else ''
-            # Classify: any time slot → working exception; else → holiday
-            is_special_workday = bool(re.search(
-                r'\(s\|\d{1,2}:\d{2}\|f\|\d{1,2}:\d{2}\)', body_text
-            ))
+            # Classify: any time slot → working exception; else → holiday.
+            # Both P6 field orders count — see _TIME_SLOT_RE. A seven-day
+            # continuous calendar can carry dozens of finish-first exception
+            # bodies; matching only start-first turned every one of them into
+            # an invented day off.
+            is_special_workday = bool(_TIME_SLOT_RE.search(body_text))
             # Parse the serial into an ISO date
             iso_date = _xer_exception_serial_to_iso(serial_raw)
             if iso_date:
@@ -587,37 +656,46 @@ def parse_calendar_data(clndr_data_str):
     # above — this fallback preserves holidays without double-classifying.
     if exc_block:
         walker_working = set(result['special_workdays'])
-        # Pre-scan for serials that have a time-slot body → those are
-        # special_workdays, not holidays. Pattern: `d|<serial>` followed
-        # (within a few chars) by `(s|HH:MM|f|HH:MM)`.
-        special_serials = set(re.findall(
-            r'd\|(\d+)\)\(\(?\(?0?\|?\|?0?\(s\|\d{1,2}:\d{2}\|f\|',
-            exc_block,
-        ))
-        # Integer Excel-serial exceptions: d|<int>
-        for serial in re.findall(r'd\|(\d+)\b', exc_block):
-            iso = _xer_exception_serial_to_iso(serial)
-            if not iso:
+        # Classify EACH integer-serial exception by whether ITS OWN segment
+        # (from this serial up to the next serial) contains a work time-slot.
+        # A segment with a time-slot is a special workday (modified working
+        # day), NOT a holiday; an empty body is a genuine non-working holiday.
+        #
+        # The earlier pre-scan regex required the serial and its time-slot body
+        # to be adjacent. P6 separates them with line markers (\x7f\x7f) +
+        # whitespace, so on continuous calendars (7x24 / 7-Day) every working
+        # exception fell through to `holidays`: a continuous calendar decoded
+        # to hundreds of phantom days off and CPM finish dates moved by months.
+        # Per-segment scanning is separator-tolerant and preserves real
+        # statutory holidays (empty body) on work calendars.
+        _time_slot = _TIME_SLOT_RE
+        _int_serials = list(re.finditer(r'd\|(\d+)\b', exc_block))
+        for _idx, _m in enumerate(_int_serials):
+            iso = _xer_exception_serial_to_iso(_m.group(1))
+            if not iso or iso in walker_working:
                 continue
-            if iso in walker_working:
-                continue
-            if serial in special_serials:
+            _seg_end = (_int_serials[_idx + 1].start()
+                        if _idx + 1 < len(_int_serials) else len(exc_block))
+            if _time_slot.search(exc_block[_m.end():_seg_end]):
                 if iso not in result['special_workdays']:
                     result['special_workdays'].append(iso)
             else:
                 result['holidays'].append(iso)
-        # Legacy string exceptions: d|YYYY-MM-DD
+        # Legacy string exceptions: d|YYYY-MM-DD (no inline body observed in
+        # this layout; treat as non-working holidays unless already working).
         for iso in re.findall(r'd\|(\d{4}-\d{2}-\d{2})', exc_block):
             try:
                 y = int(iso[:4])
-                if 1990 <= y <= 2050 and iso not in walker_working:
+                if 1970 <= y <= 2099 and iso not in walker_working:
                     result['holidays'].append(iso)
             except ValueError:
                 continue
 
-    # Remove duplicates and sort
-    result['holidays'] = sorted(list(set(result['holidays'])))
-    result['special_workdays'] = sorted(list(set(result['special_workdays'])))
+    # Remove duplicates and sort. A day carrying explicit work hours is a
+    # working day, never a holiday: if two parse paths disagree on a serial,
+    # special_workday wins (insurance against double-classification).
+    result['special_workdays'] = sorted(set(result['special_workdays']))
+    result['holidays'] = sorted(set(result['holidays']) - set(result['special_workdays']))
 
     return result
 
@@ -625,7 +703,9 @@ def parse_calendar_data(clndr_data_str):
 def _xer_exception_serial_to_iso(serial_raw):
     """Convert a P6 exception date serial (int or YYYY-MM-DD) to an ISO date string.
 
-    Returns '' if the value is malformed or out of the 1990–2050 sanity range.
+    Returns '' if the value is malformed or out of the 1970–2099 sanity range.
+    (The window was 1990–2050 before v0.2.0, which dropped genuine holidays
+    entered for later years.)
     """
     s = serial_raw.strip()
     # Integer Excel-serial date
@@ -634,7 +714,7 @@ def _xer_exception_serial_to_iso(serial_raw):
             serial = int(s)
             # Excel/P6 epoch = 1899-12-30 (accounts for the 1900 leap-year bug)
             dt = datetime(1899, 12, 30) + timedelta(days=serial)
-            if 1990 <= dt.year <= 2050:
+            if 1970 <= dt.year <= 2099:
                 return dt.strftime('%Y-%m-%d')
         except (ValueError, OverflowError):
             pass
@@ -643,7 +723,7 @@ def _xer_exception_serial_to_iso(serial_raw):
     if m:
         try:
             dt = datetime.strptime(m.group(1), '%Y-%m-%d')
-            if 1990 <= dt.year <= 2050:
+            if 1970 <= dt.year <= 2099:
                 return m.group(1)
         except ValueError:
             pass
@@ -858,62 +938,120 @@ def calendar_resolution_block(resolution, keep=None):
     }
 
 
+def _calendar_day(d):
+    """The calendar day of a date, datetime or 'YYYY-MM-DD[ HH:MM]' string, as
+    a datetime at midnight; None when it cannot be read.
+
+    Every working-day count in this module is a count of DAYS, and a P6 date
+    carries a clock time. Before v0.2.0 the time was stripped from string
+    inputs only: a datetime whose clock time was earlier than the start's was
+    never reached by a walk in whole days from the start instant, so Friday
+    17:00 to Monday 08:00 counted Friday alone, and a date could not be
+    compared with a datetime at all.
+    """
+    if isinstance(d, str):
+        try:
+            return datetime.strptime(d[:10], '%Y-%m-%d')
+        except (ValueError, TypeError):
+            return None
+    if isinstance(d, datetime):
+        return d.replace(hour=0, minute=0, second=0, microsecond=0)
+    if hasattr(d, 'year') and hasattr(d, 'month') and hasattr(d, 'day'):
+        return datetime(d.year, d.month, d.day)
+    return None
+
+
 def get_work_days_between(start_date, end_date, calendar_info=None):
     """
     Calculate work days between two dates using calendar info.
     Accounts for work week pattern and holiday exceptions.
     If calendar_info is None or empty, defaults to Mon-Fri with no holidays.
+    Both dates are read on their calendar day, so the count includes both
+    endpoint days whatever their clock times.
     """
     if not start_date or not end_date:
         return None
 
-    try:
-        if isinstance(start_date, str):
-            start = datetime.strptime(start_date[:10], '%Y-%m-%d')
-        else:
-            start = start_date
-        if isinstance(end_date, str):
-            end = datetime.strptime(end_date[:10], '%Y-%m-%d')
-        else:
-            end = end_date
-    except (ValueError, TypeError):
+    start = _calendar_day(start_date)
+    end = _calendar_day(end_date)
+    if start is None or end is None:
         return None
 
     # Default to Mon-Fri in P6 weekday scheme (0=Sun, 1=Mon...6=Sat)
     if calendar_info is None:
         work_days = [1, 2, 3, 4, 5]
         holidays = set()
+        special_workdays = set()
     else:
         work_days = calendar_info.get('work_days') or [1, 2, 3, 4, 5]
         holidays = set(calendar_info.get('holidays') or [])
+        special_workdays = set(calendar_info.get('special_workdays') or [])
+
+    # A span beyond ~100 years is not a real schedule window — a garbled or
+    # sentinel date (e.g. a 9999 finish) reached this function. Refuse to compute
+    # and return None (like missing/unparsable dates) rather than loop for
+    # millions of days or return a plausible-but-wrong count.
+    MAX_SPAN_DAYS = 366 * 100
+    if (end - start).days > MAX_SPAN_DAYS:
+        return None
 
     count = 0
     current = start
     while current <= end:
-        day_of_week = current.weekday()
-        # Python weekday: Mon=0..Sun=6; P6 work_days uses Sun=0..Sat=6
-        # Convert: Python Mon=0 → P6 index 1, Python Sun=6 → P6 index 0
-        p6_day = (day_of_week + 1) % 7
-        date_str = current.strftime('%Y-%m-%d')
-
-        if p6_day in work_days and date_str not in holidays:
+        # Single source of truth for working-day status, so forced-ON
+        # (special_workdays) and forced-OFF (holidays) exceptions are honored.
+        if _is_work_day(current, work_days, holidays, special_workdays):
             count += 1
-
         current += timedelta(days=1)
 
     return count
 
 
-def _is_work_day(dt, work_days, holidays):
+def _is_work_day(dt, work_days, holidays, special_workdays=None):
     """True if dt (date/datetime) is a working day on the given calendar.
 
     work_days: list of P6 weekday indices (0=Sun, 1=Mon, ..., 6=Sat).
-    holidays: iterable of 'YYYY-MM-DD' exception date strings (non-working).
+    holidays: iterable of 'YYYY-MM-DD' exception date strings (forced OFF —
+        non-working even when the weekday is normally worked, e.g. a stat day).
+    special_workdays: iterable of 'YYYY-MM-DD' exception date strings (forced
+        ON — worked even when the weekday is normally non-working, e.g. a worked
+        Saturday). Optional for backward compatibility; default = none.
+
+    Exception precedence: an explicit holiday wins (the day is off), then an
+    explicit special workday (the day is on), otherwise the weekly pattern.
     """
+    date_str = dt.strftime('%Y-%m-%d')
+    if date_str in holidays:
+        return False
+    if special_workdays and date_str in special_workdays:
+        return True
     day_of_week = dt.weekday()  # Python: Mon=0..Sun=6
     p6_day = (day_of_week + 1) % 7  # Python Mon=0 → P6 1 ; Python Sun=6 → P6 0
-    date_str = dt.strftime('%Y-%m-%d')
-    return (p6_day in work_days) and (date_str not in holidays)
+    return p6_day in work_days
+
+
+def _round_half_up(x):
+    """Return floor(x + 0.5) as int — HALF-UP, not banker's rounding.
+
+    Mirrors ``_round_half_up`` in cpp-cpm-engine's Python reference
+    (python_reference/cpm.py) and ``_roundHalfUp`` in cpm-engine.js, so the
+    same fractional duration resolves to the same whole workday count here and
+    in the engine.
+
+    Before v0.2.0 this module used ``int(round(x))``, which is Python's
+    round-half-to-even: round(0.5) = 0 and round(2.5) = 2, while the engine
+    returns 1 and 3. On a Mon-Fri calendar from Mon 2026-08-17,
+    add_work_days(..., 0.5) answered 2026-08-17 here and 2026-08-18 in the
+    engine. Durations and lags of exactly half a day are common in real
+    exports, and every one of them resolved a working day differently
+    depending on which module handled it.
+    """
+    if x is None:
+        return 0
+    try:
+        return int(math.floor(float(x) + 0.5))
+    except (TypeError, ValueError):
+        return 0
 
 
 def add_work_days(start_date, n_workdays, calendar_info=None):
@@ -924,21 +1062,35 @@ def add_work_days(start_date, n_workdays, calendar_info=None):
     and exception holidays (``calendar_info['holidays']``), counting only actual
     work days. Returns when ``n_workdays`` working days have been consumed.
 
-    This is the inverse of ``get_work_days_between`` and drives calendar-aware
-    CPM forward-pass arithmetic: a 5-workday task on a Mon-Fri calendar starting
-    on Monday finishes Friday — NOT Saturday (the ordinal-arithmetic bug that
-    silently wrecked every TIA on a non-7-day calendar).
+    GAP SEMANTICS, not occupancy. The result is the date N working days AFTER
+    the anchor; the anchor day itself is not one of the N. On a Mon-Fri
+    calendar, ``add_work_days(Mon, 5)`` is the FOLLOWING Monday, and
+    ``add_work_days(Mon, 4)`` is Friday. So a task of D working days starting
+    on ES finishes on::
+
+        EF = add_work_days(ES, D - 1)
+
+    (Before v0.2.0 this docstring claimed the opposite — 'a 5-workday task on a
+    Mon-Fri calendar starting on Monday finishes Friday' — which is what
+    ``add_work_days(Mon, 4)`` returns, not ``add_work_days(Mon, 5)``:
+    add_work_days('2026-08-17' Mon, 5) = 2026-08-24 Mon;
+    add_work_days('2026-08-17', 4) = 2026-08-21 Fri. A caller that followed
+    the old docstring and wrote ``finish = add_work_days(start, duration)``
+    landed one working day late on every activity.)
 
     Args:
         start_date: 'YYYY-MM-DD' string OR datetime/date object.
-        n_workdays: float or int — fractional workdays are rounded to the nearest
-            whole workday count internally (P6 CPM works on whole-day nodes).
+        n_workdays: float or int — fractional workdays are rounded to a whole
+            workday count internally, HALF-UP (0.5 → 1, 2.5 → 3), matching
+            cpp-cpm-engine. P6 CPM works on whole-day nodes.
         calendar_info: dict from get_calendar_map(). None → Mon-Fri, no holidays.
 
     Returns:
         A ``date`` object N working days after start_date. ``n_workdays == 0``
-        returns start_date unchanged. Negative ``n_workdays`` delegates to
-        ``subtract_work_days`` for symmetry.
+        SNAPS a non-working anchor FORWARD to the next working day (and leaves
+        a working anchor alone); ``subtract_work_days(d, 0)`` snaps backward,
+        so add-0 followed by subtract-0 is not the identity. Negative
+        ``n_workdays`` delegates to ``subtract_work_days`` for symmetry.
 
     Raises:
         ValueError if start_date cannot be parsed.
@@ -946,7 +1098,7 @@ def add_work_days(start_date, n_workdays, calendar_info=None):
     if n_workdays is None:
         n_workdays = 0
     try:
-        n = int(round(float(n_workdays)))
+        n = _round_half_up(float(n_workdays))
     except (TypeError, ValueError):
         n = 0
     if n < 0:
@@ -963,28 +1115,40 @@ def add_work_days(start_date, n_workdays, calendar_info=None):
     else:
         current = start_date  # assume date-like
 
-    if n == 0:
-        return current
-
     if calendar_info is None:
         work_days = [1, 2, 3, 4, 5]
         holidays = set()
+        special_workdays = set()
     else:
         work_days = calendar_info.get('work_days') or [1, 2, 3, 4, 5]
         holidays = set(calendar_info.get('holidays') or [])
+        special_workdays = set(calendar_info.get('special_workdays') or [])
 
     # Guard: a calendar with zero working days would loop forever.
     if not work_days:
         return current
 
-    # P6 CPM convention: EF = ES + duration means the task occupies N work days
-    # (NOT N gaps). We step one day per iteration and decrement `remaining`
-    # whenever we land on a work day. The final decrement lands us on the EF
-    # date — i.e. the date of work day N.
+    if n == 0:
+        # Zero-day snap, matching cpp-cpm-engine (add_work_days in its Python
+        # reference, addWorkDays in cpm-engine.js): a non-working anchor moves
+        # FORWARD to the next working day. This module used to return the
+        # anchor unchanged, so the identical call on the identical calendar
+        # answered two different dates depending on which module the caller
+        # reached; on a calendar carrying a long run of exception days the two
+        # answers can be months apart.
+        while not _is_work_day(current, work_days, holidays, special_workdays):
+            current += timedelta(days=1)
+        return current
+
+    # Walks N GAPS: `remaining` decrements once per working day LANDED ON after
+    # the anchor, so the anchor day is not counted. EF for a D-day task is
+    # therefore add_work_days(ES, D - 1). (This comment used to assert the
+    # opposite — 'the task occupies N work days (NOT N gaps)' — which the code
+    # has never done; see the docstring.)
     remaining = n
     while remaining > 0:
         current += timedelta(days=1)
-        if _is_work_day(current, work_days, holidays):
+        if _is_work_day(current, work_days, holidays, special_workdays):
             remaining -= 1
     return current
 
@@ -993,15 +1157,22 @@ def subtract_work_days(end_date, n_workdays, calendar_info=None):
     """Walk backwards N working days from ``end_date`` on the given calendar.
 
     Used by the CPM backward pass: LS = LF - duration on the activity's calendar.
-    A 5-workday task finishing Friday starts Monday (not the prior Sunday).
 
-    Same arg conventions as ``add_work_days``. Negative ``n_workdays`` delegates
-    forward (inverse symmetry).
+    GAP SEMANTICS, mirroring ``add_work_days``: the result is the date N
+    working days BEFORE the anchor, which is not itself counted. On a Mon-Fri
+    calendar a task of D working days finishing on LF starts on
+    ``subtract_work_days(LF, D - 1)`` — a 5-day task finishing Friday starts
+    Monday, which is ``subtract_work_days(Fri, 4)``.
+
+    Same arg conventions as ``add_work_days`` (half-up rounding of fractional
+    workdays). ``n_workdays == 0`` snaps a non-working anchor BACKWARD to the
+    prior working day. Negative ``n_workdays`` delegates forward (inverse
+    symmetry).
     """
     if n_workdays is None:
         n_workdays = 0
     try:
-        n = int(round(float(n_workdays)))
+        n = _round_half_up(float(n_workdays))
     except (TypeError, ValueError):
         n = 0
     if n < 0:
@@ -1017,23 +1188,30 @@ def subtract_work_days(end_date, n_workdays, calendar_info=None):
     else:
         current = end_date
 
-    if n == 0:
-        return current
-
     if calendar_info is None:
         work_days = [1, 2, 3, 4, 5]
         holidays = set()
+        special_workdays = set()
     else:
         work_days = calendar_info.get('work_days') or [1, 2, 3, 4, 5]
         holidays = set(calendar_info.get('holidays') or [])
+        special_workdays = set(calendar_info.get('special_workdays') or [])
 
     if not work_days:
+        return current
+
+    if n == 0:
+        # Symmetric to add_work_days: matches cpp-cpm-engine's
+        # subtract_work_days / subtractWorkDays, which snap a non-working
+        # anchor BACKWARD to the prior working day.
+        while not _is_work_day(current, work_days, holidays, special_workdays):
+            current -= timedelta(days=1)
         return current
 
     remaining = n
     while remaining > 0:
         current -= timedelta(days=1)
-        if _is_work_day(current, work_days, holidays):
+        if _is_work_day(current, work_days, holidays, special_workdays):
             remaining -= 1
     return current
 
@@ -1267,6 +1445,13 @@ def generate_summary(data):
     real_tasks = [t for t in tasks if t.get('task_type', '') not in ('TT_LOE', 'TT_WBS')]
     milestones = [t for t in real_tasks if t.get('task_type', '') in ('TT_Mile', 'TT_FinMile')]
 
+    # Work activities = real tasks minus zero-duration milestone markers. A
+    # count-based percent_complete that includes milestones overstates progress
+    # on milestone-heavy schedules, so we also report a work-only completion.
+    work_tasks = [t for t in real_tasks if t.get('task_type', '') not in MILESTONE_TASK_TYPES]
+    work_total = len(work_tasks)
+    complete_work = len([t for t in work_tasks if t.get('status_code', '') == 'TK_Complete'])
+
     total = len(real_tasks)
     complete = len([t for t in real_tasks if t.get('status_code', '') == 'TK_Complete'])
     in_progress = len([t for t in real_tasks if t.get('status_code', '') == 'TK_Active'])
@@ -1275,11 +1460,15 @@ def generate_summary(data):
     summary['schedule_metrics'] = {
         'total_activities': total,
         'total_including_loe': len(tasks),
-        'loe_count': len(tasks) - len(real_tasks),
+        'loe_count': len([t for t in tasks if t.get('task_type', '') == 'TT_LOE']),
+        'wbs_count': len([t for t in tasks if t.get('task_type', '') == 'TT_WBS']),
         'complete': complete,
         'in_progress': in_progress,
         'not_started': not_started,
         'percent_complete': round((complete / total * 100), 1) if total > 0 else 0,
+        'work_task_count': work_total,
+        'complete_work': complete_work,
+        'percent_complete_work': round((complete_work / work_total * 100), 1) if work_total > 0 else 0,
         'milestone_count': len(milestones),
         'milestones_complete': len([m for m in milestones if m.get('status_code') == 'TK_Complete']),
         'milestones_remaining': len([m for m in milestones if m.get('status_code') != 'TK_Complete']),
@@ -1322,10 +1511,8 @@ def generate_summary(data):
                 'early_start': t.get('early_start_date', ''),
                 'early_finish': t.get('early_end_date', ''),
             }
-            for t in critical_by_float[:50]  # Cap the summary list
+            for t in critical_by_float
         ],
-        'note': '(Showing first 50 critical activities in summary. Full list available via get_table.)'
-            if len(critical_by_float) > 50 else '',
     }
 
     # Float distribution — uses per-activity calendar hours, not hardcoded 8hr
@@ -1550,8 +1737,9 @@ def print_summary(data, output_file=None):
     lines.append('─' * 40)
     lines.append('SCHEDULE METRICS')
     lines.append('─' * 40)
-    lines.append(f"  Total Activities:     {sm['total_activities']} (excl. {sm['loe_count']} LOE)")
-    lines.append(f"  Complete:             {sm['complete']} ({sm['percent_complete']}%)")
+    lines.append(f"  Total Activities:     {sm['total_activities']} (excl. {sm['loe_count']} LOE, {sm['wbs_count']} WBS summary)")
+    lines.append(f"  Complete:             {sm['complete']} ({sm['percent_complete']}% of all activities)")
+    lines.append(f"  Work-task completion: {sm['complete_work']}/{sm['work_task_count']} ({sm['percent_complete_work']}%, excl. milestones)")
     lines.append(f"  In Progress:          {sm['in_progress']}")
     lines.append(f"  Not Started:          {sm['not_started']}")
     lines.append(f"  Milestones:           {sm['milestone_count']} ({sm['milestones_complete']} hit, {sm['milestones_remaining']} remaining)")
@@ -1625,7 +1813,7 @@ def print_summary(data, output_file=None):
         lines.append(f"  Field Validation:       {fv}")
     else:
         lines.append(f"  Field Validation:       {len(fv)} issues found")
-        for issue in fv[:10]:
+        for issue in fv:
             lines.append(f"    - {issue}")
     lines.append('')
     lines.append('=' * 70)
@@ -1966,7 +2154,7 @@ def validate_schedule(data, profile='commercial', subject=None):
         report.add(Finding(
             severity=INFO,
             check_id='XER-FIELD-COUNT-SKIPPED',
-            message=f'P6 version {version!r} not in schema map — field-count check skipped',
+            message=f'P6 version {version!r} not in schema map. Field-count check skipped.',
             evidence={'p6_version': version},
             reference='P6 XER schema (field counts by version)',
         ))
@@ -1977,7 +2165,7 @@ def validate_schedule(data, profile='commercial', subject=None):
         report.add(Finding(
             severity=BLOCK,
             check_id='XER-PROJECT-MISSING',
-            message='No PROJECT records found in the XER — file is not a valid schedule',
+            message='No PROJECT records found in the XER. File is not a valid schedule.',
             evidence={'project_count': 0},
             reference='AACE 29R-03 §2.1 (baseline schedule validation)',
         ))
@@ -1985,7 +2173,7 @@ def validate_schedule(data, profile='commercial', subject=None):
         report.add(Finding(
             severity=INFO,
             check_id='XER-MULTI-PROJECT',
-            message=f'Multi-project XER — {len(projects)} PROJECT records found',
+            message=f'Multi-project XER: {len(projects)} PROJECT records found',
             evidence={'project_count': len(projects),
                       'project_ids': [p.get('proj_id', '') for p in projects]},
             reference='P6 XER structure (multi-project export)',
@@ -1997,7 +2185,7 @@ def validate_schedule(data, profile='commercial', subject=None):
         report.add(Finding(
             severity=BLOCK,
             check_id='XER-CALENDAR-MISSING',
-            message='No CALENDAR records found in the XER — activity durations cannot be computed',
+            message='No CALENDAR records found in the XER. Activity durations cannot be computed.',
             evidence={'calendar_count': 0},
             reference='AACE 29R-03 §2.1.B.10 (calendar validation)',
         ))
@@ -2071,7 +2259,7 @@ def validate_schedule(data, profile='commercial', subject=None):
             report.add(Finding(
                 severity=BLOCK,
                 check_id='XER-WBS-DEPTH-LOW',
-                message=f'WBS is too shallow — max depth {max_wbs_depth} < {wbs_min} ({profile} profile minimum)',
+                message=f'WBS is too shallow: max depth {max_wbs_depth} < {wbs_min} ({profile} profile minimum)',
                 evidence={'max_wbs_depth': max_wbs_depth, 'min_required': wbs_min, 'profile': profile},
                 reference='CPP profile heuristic / AACE 38R-06 §3.5 (Planning Basis)',
             ))
@@ -2079,7 +2267,7 @@ def validate_schedule(data, profile='commercial', subject=None):
             report.add(Finding(
                 severity=WARN,
                 check_id='XER-WBS-DEPTH-HIGH',
-                message=f'WBS is unusually deep — max depth {max_wbs_depth} > {wbs_max} ({profile} profile maximum)',
+                message=f'WBS is unusually deep: max depth {max_wbs_depth} > {wbs_max} ({profile} profile maximum)',
                 evidence={'max_wbs_depth': max_wbs_depth, 'max_allowed': wbs_max, 'profile': profile},
                 reference='CPP profile heuristic / AACE 38R-06 §3.5 (Planning Basis)',
             ))
@@ -2136,7 +2324,7 @@ def validate_schedule(data, profile='commercial', subject=None):
             check_id='XER-NO-TASKPRED',
             message=(
                 f'Schedule has {len(non_summary_tasks)} non-summary, non-milestone '
-                f'activities but zero TASKPRED relationships tie any of them — no work logic exists'
+                f'activities but zero TASKPRED relationships tie any of them. No work logic exists.'
             ),
             evidence={
                 'non_summary_task_count': len(non_summary_tasks),
@@ -2256,7 +2444,10 @@ def generate_xer(data, output_path, p6_version='24.12', currency='CAD',
     When an 'ermhdr' block is present in `data` it is preserved verbatim.
     Otherwise the 9-field P6 header is synthesised from the kwargs.
 
-    Tables are written in P6 24.12 canonical order with CRLF line endings.
+    Tables are written in TABLE_ORDER, then any table not named there, with CRLF
+    line endings. TABLE_ORDER is a generation order that P6 imports cleanly, not
+    a canonical export order: real exports use no single order (38 distinct %T
+    sequences across the 166 measured). See the TABLE_ORDER comment.
     Encoding defaults to utf-8 (pass 'cp1252' for strict legacy P6 compatibility).
     """
     lines = []
@@ -2267,26 +2458,26 @@ def generate_xer(data, output_path, p6_version='24.12', currency='CAD',
     # on version. Preserve whatever the source had.
     raw_ermhdr = data.get('ermhdr', {}).get('raw')
     if raw_ermhdr and isinstance(raw_ermhdr, list) and len(raw_ermhdr) >= 5:
-        lines.append('\t'.join(raw_ermhdr))
+        lines.append('\t'.join(_sanitize_cell(p) for p in raw_ermhdr))
     else:
         export_date = datetime.now().strftime(P6_DATE_FORMAT)
         ermhdr_parts = [
             'ERMHDR', p6_version, export_date, export_scope,
             user, user_full_name, database, module, currency,
         ]
-        lines.append('\t'.join(ermhdr_parts))
+        lines.append('\t'.join(_sanitize_cell(p) for p in ermhdr_parts))
 
-    # Write tables in canonical order
+    # Write tables in TABLE_ORDER (a generation order, not a canonical one)
     tables = data.get('tables', {})
 
-    # First write tables in canonical order, then any remaining
+    # First the tables TABLE_ORDER names, then any remaining
     written = set()
     for table_name in TABLE_ORDER:
         if table_name in tables:
             _write_table(lines, table_name, tables[table_name])
             written.add(table_name)
 
-    # Any remaining tables not in canonical order
+    # Any remaining tables TABLE_ORDER does not name
     for table_name in tables:
         if table_name not in written:
             _write_table(lines, table_name, tables[table_name])
@@ -2310,15 +2501,43 @@ def generate_xer(data, output_path, p6_version='24.12', currency='CAD',
     return output_path
 
 
+def _sanitize_cell(value):
+    """Collapse embedded TSV delimiters (tab / CR / LF) in a cell value.
+
+    XER is tab-delimited and newline-terminated. A field value that itself
+    contains a raw tab injects a phantom column; one containing a newline
+    splits the row — silently corrupting the file and scrambling later columns
+    (e.g. status_code reading as the tail of a task_name). The field-COUNT
+    assertion in _write_table cannot catch this: the values list length is
+    still correct before the tab-join. We collapse any \\t / \\r / \\n run
+    to a single space.
+
+    Real P6 exports never carry raw delimiters in values, so this is a no-op on
+    genuine schedules; it only neutralizes programmatically-built data —
+    half-step generation, hand-built models, multi-line memo text — that would
+    otherwise emit a malformed XER.
+    """
+    if value is None:
+        return ''
+    s = value if isinstance(value, str) else str(value)
+    if '\t' in s or '\n' in s or '\r' in s:
+        s = re.sub(r'[\t\r\n]+', ' ', s)
+    return s
+
+
 def _write_table(lines, table_name, table_data):
     """Write a single table's %T, %F, and %R lines.
 
     Asserts row/field-count parity per row before emitting %R — a mismatch
-    causes a blank import grid in P6 (see SKILL.md §3). Because each value
-    is sourced by .get(field, '') against the canonical fields list, the two
-    counts can only diverge if the fields list itself is empty/None or
-    mutated mid-loop, but the explicit assertion makes the contract loud and
-    fails fast instead of producing a silently broken XER.
+    causes a blank import grid in P6 (see the README, "XER generation rules").
+    Because each value is sourced by .get(field, '') against the canonical
+    fields list, the two counts can only diverge if the fields list itself is
+    empty/None or mutated mid-loop, but the explicit assertion makes the
+    contract loud and fails fast instead of producing a silently broken XER.
+
+    Every emitted token (table name, field names, cell values) is run through
+    _sanitize_cell so an embedded tab/newline in any value cannot break the
+    row/column framing.
     """
     fields = table_data.get('fields', [])
     records = table_data.get('records', [])
@@ -2327,19 +2546,16 @@ def _write_table(lines, table_name, table_data):
         return
 
     # %T line
-    lines.append(f'%T\t{table_name}')
+    lines.append(f'%T\t{_sanitize_cell(table_name)}')
 
     # %F line
-    lines.append('%F\t' + '\t'.join(fields))
+    lines.append('%F\t' + '\t'.join(_sanitize_cell(f) for f in fields))
 
     # %R lines
     for record in records:
         values = []
         for field in fields:
-            val = record.get(field, '')
-            if val is None:
-                val = ''
-            values.append(str(val))
+            values.append(_sanitize_cell(record.get(field, '')))
         if len(values) != len(fields):
             raise ValueError(
                 f"Field count mismatch in table {table_name!r}: "

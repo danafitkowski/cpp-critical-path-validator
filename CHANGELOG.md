@@ -25,6 +25,19 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
   project's (`PROJECT.clndr_id`), else the calendar flagged `default_flag = 'Y'`. The
   parsed data is not modified. This lifts the two known limits v0.2.0 recorded for a
   blank task calendar, in Check 3 and in DCMA-14.
+- **A finish-first calendar reads as the week it declares.** P6 writes a working time
+  slot start-first, `(s|08:00|f|16:00)`, or finish-first, `(f|16:00|s|08:00)`, and
+  the order belongs to the calendar. The bundled parser read start-first slots only,
+  so a finish-first calendar decoded to no working days, which the working-day
+  arithmetic counts as Monday to Friday, and its worked exception days were filed as
+  holidays. DCMA-14 #13 measures the critical path in working days on the project
+  calendar: on a finish-first seven-day calendar a Monday-to-Monday critical path read
+  as 5 working days instead of 7, and CPLI was computed on that length. With
+  cpp-cpm-engine present, Check 3's working-day finish test was handed the same empty
+  week. The bundled parser now decodes both orders (see Changed).
+  `tests/test_dcma14_finish_first_calendar_2026_09_29.py` has 5 tests on synthetic
+  calendars; 4 of them fail against the previous parser, and CI runs the file under
+  pytest and directly. The suite is 189 tests.
 - **The README's examples run, and it says what the public engine does.** Three of the
   README's four Python examples raised when run. The quick start printed
   `results['cp_confidence_score']` and `results['cp_confidence_band']`, keys
@@ -93,14 +106,26 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ### Changed
 
-- **The bundled parser is re-vendored** from `cpp-xer-parser` at `b5a2038`, which
-  adds `resolve_task_calendars`, `with_resolved_calendars` and
-  `calendar_resolution_block`. Its `validate_schedule` now also reports activity
-  calendars (BLOCK `XER-TASK-CALENDAR-UNRESOLVED`, INFO `XER-TASK-CALENDAR-FALLBACK`),
-  and `generate_summary` converts float on the resolved calendar. A file whose TASK
-  rows carry no calendar, and which names no project or default calendar, now draws
-  that BLOCK, and `aace_31r_compliance` scores it accordingly. `XER_PIN` and
-  `XER_SHA256` move together.
+- **The bundled parser is re-vendored** from `cpp-xer-parser` at its release
+  [`v0.2.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.2.0),
+  commit `33e8063` (this section first re-vendored it at `b5a2038`). `XER_PIN` and
+  `XER_SHA256` move together, and the README names the release. `validation.py` and
+  `config_profiles.py` were already identical to v0.2.0's. What arrives with it:
+  - `resolve_task_calendars`, `with_resolved_calendars` and
+    `calendar_resolution_block`, first vendored at `b5a2038`. The bundled
+    `validate_schedule` now also reports activity calendars (BLOCK
+    `XER-TASK-CALENDAR-UNRESOLVED`, INFO `XER-TASK-CALENDAR-FALLBACK`), and
+    `generate_summary` converts float on the resolved calendar. A file whose TASK rows
+    carry no calendar, and which names no project or default calendar, now draws that
+    BLOCK, and `aace_31r_compliance` scores it accordingly.
+  - The calendar decode that reads finish-first time slots; see Fixed.
+  - For code that imports the bundled parser itself: `get_work_days_between`,
+    `add_work_days` and `subtract_work_days` honour worked exception days and read
+    dates on their calendar day, `generate_xer` collapses a tab or line break inside a
+    value to a space, and `generate_summary` counts LOE and WBS summary rows apart and
+    lists every critical activity. The validator calls none of these. The parser's
+    [CHANGELOG](https://github.com/danafitkowski/cpp-xer-parser/blob/v0.2.0/CHANGELOG.md)
+    lists every change in the release.
 - `dcma14.py` no longer carries the stand-in resolver it used while the bundled parser
   had none, so the `calendar_resolution` block no longer has the `note` key that
   stand-in added. The `work_day_delta` stand-in stays.

@@ -20,7 +20,7 @@ This is v0.2.0, and it is a public subset. Critical Path Partners maintains a la
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
-`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at commit [`b5a2038`](https://github.com/danafitkowski/cpp-xer-parser/commit/b5a2038ede3fecefff1931944ba5c813cde2523d), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.2.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.2.0) (commit [`33e8063`](https://github.com/danafitkowski/cpp-xer-parser/commit/33e8063e9b0d912ae425edd1c38802116ee9d951)), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 ---
 
