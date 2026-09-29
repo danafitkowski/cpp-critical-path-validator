@@ -89,8 +89,8 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
     so on the schedules above both checks count the early milestone, and both excuse
     a completion milestone that floats at the finish (see the next entry). The two
     tests still differ. DCMA-14 #1 excuses only a finish milestone, critical or not,
-    and only at or after the latest finish of all the work, to the minute, an activity
-    tied to nothing included. It therefore still counts any other activity that ends
+    and only at or after the latest finish of the remaining work, to the minute, an
+    activity tied to nothing included. It therefore still counts any other activity that ends
     the network, and a finish milestone that Check 3 takes as finishing with the
     network earlier the same day, across a non-working gap, or before a later activity
     tied to nothing.
@@ -127,9 +127,12 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
   #1 now counts incomplete activities only, as #6, #7 and #8 already did. A start
   milestone with no predecessor is excused only at or before the earliest start of
   all the work, and a finish milestone with no successor only at or after the latest
-  finish of all the work, completed work included in both. Each activity is placed by
-  its actual date, else its early date, else its planned date, and one with no date
-  is not excused. A finish milestone always needs a predecessor. The check's details
+  finish of the remaining work. Each activity is placed by its actual date, else its
+  early date, else its planned date, and one with no date is not excused. Completed
+  work counts in placing the network's start, never its finish: on an update statused
+  past its data date, an actual finish later than the remaining work is #9's finding
+  and does not make the completion milestone a dangling end. A finish milestone
+  always needs a predecessor. The check's details
   now list the activities missing a predecessor and those missing a successor
   separately (`missing_pred`, `missing_succ`), with their counts, their rates and the
   `denominator`, and its message gives both counts. A schedule with no incomplete
@@ -285,12 +288,13 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
   `aace_31r_compliance` scores 100 less 20 per BLOCK finding and 5 per WARN finding,
   on that schedule and on one whose WBS is too shallow, which draws a BLOCK. The last
   test fails on the previous `validation.py`. CI runs it under pytest and directly.
-- **`tests/test_dcma14_logic.py`**, 9 tests on synthetic data for DCMA-14 #1: completed
+- **`tests/test_dcma14_logic.py`**, 10 tests on synthetic data for DCMA-14 #1: completed
   work left out of the denominator, a start milestone in the middle of the network
   counted while the one that starts it is excused, the missing-predecessor and
   missing-successor counts reported separately, a finish milestone with no
-  predecessor counted, and the details of a schedule with no incomplete work. Each
-  of those five fails on the code before its fix. The other four are mutation
+  predecessor counted, the details of a schedule with no incomplete work, and the
+  completion milestone of an update statused past its data date not counted as a
+  dangling end. Each of those six fails on the code before its fix. The other four are mutation
   guards, each failing on a mutant the rest of the suite let through: the network's
   start taken over all the work, an undated milestone never excused, an activity
   missing both sides counted once, and completed work placed by its actual dates.

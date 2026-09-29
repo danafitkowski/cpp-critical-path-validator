@@ -169,11 +169,14 @@ def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile):
             'missing_pred': [], 'missing_succ': [],
             'examples': [],
         }
-    # Network anchors are taken over the WHOLE work set (completed activities
-    # included) — the network starts where the first activity started, not
-    # where the remaining work starts.
+    # The network starts where the first activity started, completed work
+    # included, not where the remaining work starts. It finishes where the
+    # remaining work finishes: on a schedule rescheduled to its data date no
+    # completed activity finishes later, and on an update statused past its
+    # data date a late actual finish is #9's finding, not a reason to count
+    # the completion milestone as a dangling end.
     starts = [d for d in (_task_start(t) for t in work_tasks) if d]
-    finishes = [d for d in (_task_finish(t) for t in work_tasks) if d]
+    finishes = [d for d in (_task_finish(t) for t in incomplete) if d]
     net_start = min(starts) if starts else None
     net_finish = max(finishes) if finishes else None
 
