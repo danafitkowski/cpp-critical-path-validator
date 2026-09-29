@@ -288,6 +288,77 @@ def _calendar_resolution(task_cals, work_tasks):
     }
 
 
+# P6's relationship-lag calendar setting (SCHEDOPTIONS.sched_calendar_on_
+# relationship_lag) names the calendar P6 measures a lag on. The tokens and
+# the fallback are the ones cpp-cpm-engine accepts: the engine walks a lag on
+# the predecessor's or the successor's calendar, and a token it does not
+# implement (the project or the 24-hour calendar) falls back to the
+# successor's.
+_LAG_CAL_ALIASES = {
+    'rcal_Predecessor': 'predecessor',
+    'rcal_Successor': 'successor',
+    'rcal_Project': 'project',
+    'rcal_24Hour': '24hour',
+    'rcal_24hour': '24hour',
+    'pred': 'predecessor',
+    'succ': 'successor',
+}
+
+
+def _resolve_lag_cal_role(token):
+    """Resolve a relationship-lag-calendar token to the calendar the engine
+    will actually walk lag on: 'predecessor' or 'successor'."""
+    t = str(token or 'successor').strip()
+    t = _LAG_CAL_ALIASES.get(t, t)
+    return t if t in ('predecessor', 'successor') else 'successor'
+
+
+def _detect_schedule_options(data, pid):
+    """The relationship-lag calendar of project `pid`, from its SCHEDOPTIONS
+    row (else the table's first row), read as CPP's internal validator reads
+    it.
+
+    P6's default, taken when the table is absent (some export profiles omit
+    it) or the field is blank, is the predecessor's calendar
+    (rcal_Predecessor). Returns ``relationship_lag_calendar`` (the token),
+    ``relationship_lag_calendar_source`` (how it was determined) and
+    ``lag_calendar_role`` ('predecessor' or 'successor': the calendar Check 5
+    converts lag hours to days on). The internal version also reads the
+    scheduling mode and the project's Must Finish By from the same row;
+    nothing in this repository uses them, so they are not read here.
+    """
+    rows = get_table(data, 'SCHEDOPTIONS')
+    row = None
+    if rows:
+        for r in rows:
+            if (r.get('proj_id') or '') == pid:
+                row = r
+                break
+        if row is None:
+            row = rows[0]
+    if row is None:
+        lag_token = 'rcal_Predecessor'
+        lag_source = (
+            'SCHEDOPTIONS table absent from export; P6 default '
+            '(predecessor calendar, rcal_Predecessor) assumed')
+    else:
+        lag_raw = (row.get('sched_calendar_on_relationship_lag') or '').strip()
+        if lag_raw:
+            lag_token = lag_raw
+            lag_source = ('SCHEDOPTIONS sched_calendar_on_relationship_lag=%s'
+                          % lag_raw)
+        else:
+            lag_token = 'rcal_Predecessor'
+            lag_source = (
+                'SCHEDOPTIONS sched_calendar_on_relationship_lag blank; P6 '
+                'default (predecessor calendar, rcal_Predecessor) assumed')
+    return {
+        'relationship_lag_calendar': lag_token,
+        'relationship_lag_calendar_source': lag_source,
+        'lag_calendar_role': _resolve_lag_cal_role(lag_token),
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────
 # MAIN VALIDATION FUNCTION
 # ─────────────────────────────────────────────────────────────────────
@@ -359,6 +430,13 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         tasks = tasks_all
         project = projects[0] if projects else {}
 
+    # The relationship-lag calendar from the selected project's SCHEDOPTIONS
+    # row. lag_calendar_role is the calendar Check 5 divides lag hours by, so
+    # a lag reads in the working days of the calendar P6 measures it on (P6's
+    # default: the predecessor's).
+    _sched_opts = _detect_schedule_options(data, target_proj_id)
+    _lag_role = _sched_opts['lag_calendar_role']
+
     # Build task lookup
     task_map = {t['task_id']: t for t in tasks}
     all_task_ids = set(task_map.keys())
@@ -380,11 +458,91 @@ def validate_critical_path(data, project_index=0, profile='commercial',
 
     # Filter out LOE/WBS
     work_tasks = [t for t in tasks if not _is_loe(t)]
-    _work_task_ids = {t['task_id'] for t in work_tasks}
     incomplete_tasks = [t for t in work_tasks if not _is_complete(t)]
     complete_tasks = [t for t in work_tasks if _is_complete(t)]
     active_tasks = [t for t in work_tasks if t.get('status_code', '') == ACTIVE_STATUS]
     not_started = [t for t in work_tasks if t.get('status_code', '') == NOT_STARTED_STATUS]
+
+    # ── Up-front cycle detection ───────────────────────────────────────
+    # A schedule containing a logic cycle (A→B→A, A→B→C→A, etc.) is
+    # mathematically uncomputable: no forward pass, no finish date, no
+    # critical path. The nine checks below read the stored float,
+    # constraint and relationship fields and never test that the network is
+    # acyclic, so on their own they scored such a schedule in the GREEN band.
+    #
+    # Cycles are found with Kahn's algorithm on the pred→succ edge set of the
+    # work activities. The relationship type does not matter: if the
+    # directed graph has a cycle on any relationship type, it has one on the
+    # simplified edge set. A cycle sets ``cycle_detected``, lists the
+    # activities of each cycle found in ``cycles_found``, and forces the
+    # overall grade to RED with score 0 and confidence Unreliable. The
+    # checks still run (their findings help triage), but the headline grade
+    # is unambiguous.
+    cycle_detected = False
+    cycles_found: list[list[str]] = []
+    _work_task_ids = {t['task_id'] for t in work_tasks}
+    _cycle_pred_count: dict[str, int] = {tid: 0 for tid in _work_task_ids}
+    _cycle_succ_map: dict[str, list[str]] = {tid: [] for tid in _work_task_ids}
+    for p in preds:
+        succ_id = p.get('task_id', '')
+        pred_id = p.get('pred_task_id', '')
+        if succ_id in _work_task_ids and pred_id in _work_task_ids:
+            _cycle_pred_count[succ_id] = _cycle_pred_count.get(succ_id, 0) + 1
+            _cycle_succ_map.setdefault(pred_id, []).append(succ_id)
+    # Kahn's: remove zero-indegree nodes iteratively; anything left is
+    # in (or downstream of) a cycle.
+    _to_process = [tid for tid, c in _cycle_pred_count.items() if c == 0]
+    _remaining = dict(_cycle_pred_count)
+    while _to_process:
+        n = _to_process.pop()
+        del _remaining[n]
+        for s in _cycle_succ_map.get(n, []):
+            if s in _remaining:
+                _remaining[s] -= 1
+                if _remaining[s] == 0:
+                    _to_process.append(s)
+    if _remaining:
+        cycle_detected = True
+        # One example cycle per disjoint group of what remains, found by a
+        # depth-first walk to the first back edge. This names a cycle to
+        # break for the headline finding; it does not enumerate every
+        # elementary cycle.
+        _seen: set[str] = set()
+        for start in list(_remaining.keys()):
+            if start in _seen:
+                continue
+            # Find a back-edge cycle from this node via DFS.
+            stack = [(start, [start])]
+            visited_in_dfs = {start}
+            cycle_path: list[str] = []
+            while stack and not cycle_path:
+                node, path = stack.pop()
+                for nxt in _cycle_succ_map.get(node, []):
+                    if nxt not in _remaining:
+                        continue
+                    if nxt in path:
+                        # Found cycle: trim path to the first occurrence.
+                        i = path.index(nxt)
+                        cycle_path = path[i:] + [nxt]
+                        break
+                    if nxt not in visited_in_dfs:
+                        visited_in_dfs.add(nxt)
+                        stack.append((nxt, path + [nxt]))
+            if cycle_path:
+                cycles_found.append(cycle_path)
+                _seen.update(cycle_path)
+            else:
+                # A node downstream of a cycle but on none: mark it seen
+                # and move on.
+                _seen.add(start)
+        # Map task_ids in cycles_found to task_code labels for
+        # downstream rendering. Keep both: task_id chain is canonical;
+        # task_code chain is human-readable.
+        _id_to_code = {t['task_id']: t.get('task_code', t['task_id']) for t in work_tasks}
+        cycles_found_codes = [[_id_to_code.get(tid, tid) for tid in chain]
+                              for chain in cycles_found]
+    else:
+        cycles_found_codes = []
 
     # Project info
     proj_name = project.get('proj_short_name', 'Unknown')
@@ -407,6 +565,13 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         'overall_score': 0,
         'overall_rating': RATING_RED,
         'overall_confidence': 'Unreliable',
+        # Cycle detection: always present, so callers need no default.
+        'cycle_detected': cycle_detected,
+        'cycles_found': cycles_found_codes,
+        'cycles_found_task_ids': cycles_found,
+        # The relationship-lag calendar Check 5 converted lags on, with how
+        # it was determined.
+        'schedule_options': _sched_opts,
         # Blank TASK.clndr_id resolution: what resolved onto the project
         # calendar, and what has no usable calendar at all.
         'calendar_resolution': _calendar_resolution(_task_cals, work_tasks),
@@ -535,7 +700,20 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             label = CONSTRAINT_LABELS.get(c, c)
             cstr_breakdown[label] = cstr_breakdown.get(label, 0) + 1
 
-    if cp_constrained_pct > 50:
+    if cp_count == 0:
+        # No critical path identified: Check 2 (constraint-driven
+        # criticality) cannot be assessed, and a schedule with NO critical
+        # path is itself a serious defect (logic cycle, pervasive hard
+        # constraints, or total float everywhere). It must NOT fall through
+        # to the 0%-constrained GREEN branch below, which would inflate the
+        # overall confidence score.
+        cstr_rating = RATING_RED
+        cstr_score = 0
+        cstr_note = ('No critical path identified. Constraint-driven '
+                     'criticality cannot be assessed. A schedule with no CP is '
+                     'a serious logic defect (check for cycles, missing logic, '
+                     'or pervasive total float).')
+    elif cp_constrained_pct > 50:
         cstr_rating = RATING_RED
         cstr_score = 30
         cstr_note = f'{len(cp_constrained)}/{cp_count} CP activities ({cp_constrained_pct:.0f}%) have hard constraints. Critical path is likely ARTIFICIAL — driven by date constraints rather than logic.'
@@ -999,15 +1177,16 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             pid = p.get('pred_task_id', '')
             on_cp = tid in cp_task_ids or pid in cp_task_ids
 
-            # P6 computes lag on the successor's calendar (hours are scheduled
-            # against the successor's workday), so use the successor's clndr_id
-            # for the hrs→days conversion. Falls back to predecessor's calendar,
-            # then to the 8hr default.
-            succ_task = task_map.get(tid, {})
-            succ_clndr = succ_task.get('clndr_id', '')
-            if not succ_clndr:
-                succ_clndr = task_map.get(pid, {}).get('clndr_id', '')
-            lag_days = _hrs_to_days(lag_hrs, cal_map, succ_clndr)
+            # P6 measures lag on the calendar named by SCHEDOPTIONS.sched_
+            # calendar_on_relationship_lag (rcal_Predecessor by default), so
+            # the hrs→days conversion uses the detected role's clndr_id. Falls
+            # back to the other side's calendar, then to the 8hr default.
+            _lag_tid = pid if _lag_role == 'predecessor' else tid
+            _lag_other = tid if _lag_role == 'predecessor' else pid
+            lag_clndr = task_map.get(_lag_tid, {}).get('clndr_id', '')
+            if not lag_clndr:
+                lag_clndr = task_map.get(_lag_other, {}).get('clndr_id', '')
+            lag_days = _hrs_to_days(lag_hrs, cal_map, lag_clndr)
 
             if lag_hrs < 0:
                 neg_lags += 1
@@ -1422,6 +1601,58 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     else:
         results['overall_rating'] = RATING_RED
         results['overall_confidence'] = 'Unreliable'
+
+    # ── RED cap on the overall rating ─────────────────────────────────
+    # The nine-check score is a weighted average, so a single severe RED
+    # check (broken CP open ends, disconnected logic continuity) can be
+    # diluted to a GREEN / "High Confidence" headline by the GREEN checks
+    # around it. A GREEN "High Confidence" stamp can never sit on top of a
+    # RED check. Rule: if ANY scored check is RED, the overall cannot be
+    # GREEN: it is capped at AMBER, and a "High Confidence" label becomes
+    # "Moderate Confidence". The numeric score is left untouched (it remains
+    # auditable); only the headline rating and label are capped. The lower
+    # bands (40-60 Low, under 40 Unreliable) are already at or below this
+    # cap and unchanged.
+    red_checks = [k for k in scored_checks
+                  if results['checks'][k]['rating'] == RATING_RED]
+    if red_checks:
+        if results['overall_rating'] == RATING_GREEN:
+            results['overall_rating'] = RATING_AMBER
+        if results['overall_confidence'] == 'High Confidence':
+            results['overall_confidence'] = 'Moderate Confidence'
+        results['overall_rating_capped_by_red'] = True
+        results['red_checks'] = red_checks
+
+    # ── Cycle override ────────────────────────────────────────────────
+    # A schedule with a logic cycle is uncomputable: no forward pass, no
+    # critical path. Whatever the nine checks computed, the score is 0, the
+    # rating RED and the confidence Unreliable, and a Critical
+    # recommendation names a cycle to break.
+    if cycle_detected:
+        results['overall_score'] = 0
+        results['overall_rating'] = RATING_RED
+        results['overall_confidence'] = 'Unreliable'
+        # The prose names the first cycle found; cycles_found and
+        # cycles_found_task_ids list every one.
+        _first_chain = ' → '.join(cycles_found_codes[0]) if cycles_found_codes else ''
+        results['recommendations'].append({
+            'priority': 'Critical',
+            'category': 'Network Cycle',
+            'finding': (
+                'Schedule contains a logic cycle. The CPM forward pass '
+                'cannot complete and the critical path is undefined. '
+                f'{len(cycles_found)} cycle(s) detected. First chain: '
+                f'{_first_chain or "see cycles_found field"}.'
+            ),
+            'recommendation': (
+                'Open the relationship at any one point in the cycle '
+                'and re-import. Cycles typically arise from copy-pasted '
+                'logic between WBS sections or from mandatory finish '
+                'constraints being treated as predecessors. The '
+                'cycles_found field lists every cycle chain for review.'
+            ),
+            'affected_activity': cycles_found_codes[0][0] if cycles_found_codes else '',
+        })
 
     # Sort recommendations by priority
     priority_order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3}

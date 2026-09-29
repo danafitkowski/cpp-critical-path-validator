@@ -20,7 +20,7 @@ This is v0.2.0, and it is a public subset. Critical Path Partners maintains a la
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
-`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at commit [`b5a2038`](https://github.com/danafitkowski/cpp-xer-parser/commit/b5a2038ede3fecefff1931944ba5c813cde2523d), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.2.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.2.0) (commit [`33e8063`](https://github.com/danafitkowski/cpp-xer-parser/commit/33e8063e9b0d912ae425edd1c38802116ee9d951)), so the validator stands alone with no install step. CI verifies the vendored copy against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 ---
 
@@ -227,6 +227,21 @@ rounds up to a band's lower edge stays in the band below it.
 | 60 to under 80 | `Moderate Confidence` | `AMBER`          | CP has issues but is directionally correct.        |
 | 40 to under 60 | `Low Confidence`      | `AMBER`          | CP needs significant corrections.                  |
 | under 40       | `Unreliable`          | `RED`            | CP is artificial; do not rely on it for planning.  |
+
+Two rules sit on top of the bands:
+
+- **A logic cycle.** A schedule whose relationships loop back on themselves has no
+  forward pass and no critical path, whatever its stored float says. The validator
+  looks for cycles before any check runs. Where it finds one, `results['cycle_detected']`
+  is `True`, `results['cycles_found']` lists the cycles found, each as a closed chain
+  of activity codes (`cycles_found_task_ids` as task ids), the score is 0, the band `Unreliable`
+  and the rating `RED`, and a Critical "Network Cycle" recommendation names a cycle to
+  break. The nine checks still run, for triage.
+- **A RED check caps the headline.** The score is a weighted average, so one RED check
+  can sit under a GREEN average. Where any check is RED, the rating cannot be `GREEN`
+  (it reads `AMBER`) and `High Confidence` reads `Moderate Confidence`. The score is
+  left as computed; `results['overall_rating_capped_by_red']` is `True` and
+  `results['red_checks']` names the RED checks. The two bands below 60 are unchanged.
 
 ---
 
