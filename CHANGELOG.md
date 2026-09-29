@@ -133,11 +133,23 @@ finishes. No check has been added.
   source of truth for every XER operation. Its optional imports are split, so the
   `validation` and `config_profiles` modules this repository ships now bind although
   `audit_trail` does not ship here. On a plain clone `validate_schedule` raised
-  `RuntimeError` before and now runs. `aace_31r_compliance` now gets past the import
-  but still raises `AttributeError`: it calls `ValidationReport.count`, which upstream
-  added to its own `validation.py` in the same commit and which this repository's
-  bundled `validation.py` does not have yet. The README's provenance line kept naming
-  `5fc6c5e` after the re-vendor; it now names `a8edac6`.
+  `RuntimeError` before and now runs. `aace_31r_compliance` got past the import but
+  then raised `AttributeError`: it calls `ValidationReport.count`, which upstream added
+  to its own `validation.py` in the same commit. The next entry brings that file over,
+  and both functions now run. The README's provenance line kept naming `5fc6c5e`
+  after the re-vendor; it now names `a8edac6`.
+- **`aace_31r_compliance` runs on a plain clone.** `scripts/validation.py` is now
+  vendored byte for byte from `cpp-xer-parser` at
+  [`a8edac6`](https://github.com/danafitkowski/cpp-xer-parser/commit/a8edac6f2ef19f6cddb02dee51dc320f99f6ba38),
+  the commit `scripts/xer_parser.py` is pinned to. The bundled copy was upstream's
+  from before
+  [`389ee14`](https://github.com/danafitkowski/cpp-xer-parser/commit/389ee1432fab848ec26219eb5e9a472a09e85739),
+  so the re-vendor brings exactly that commit's change: the `count(severity)` method
+  the parser's structure score calls, with its docstring, and one module docstring
+  sentence naming the two parser functions the subset serves.
+  `scripts/config_profiles.py` already matched upstream at `a8edac6`. On a plain clone
+  `validate_schedule` and `aace_31r_compliance` now both run, and a new test pins it
+  (see Added).
 - **The AACE badge no longer advertises retracted Recommended Practices.** The README
   badge rendered `AACE: 49R-06 | 24R-03 | 67R-11` while the AACE alignment section
   below it explained that the 24R-03 and 67R-11 rows had been removed as wrongly
@@ -192,6 +204,13 @@ finishes. No check has been added.
   leads nowhere, an engine without the day arithmetic leaving the same-day test, and
   `finish_match`. Two need cpp-cpm-engine's `cpm` module and are skipped without it.
   CI runs it under pytest and directly.
+- **`tests/test_bundled_validation_runs.py`**, 3 tests on synthetic data, after
+  upstream's test of the same name: the bundled `validation.py` and
+  `config_profiles.py` bind, and are the copies in `scripts/`; `validate_schedule`
+  returns a report with no BLOCK finding on a sound schedule; and
+  `aace_31r_compliance` scores 100 less 20 per BLOCK finding and 5 per WARN finding,
+  on that schedule and on one whose WBS is too shallow, which draws a BLOCK. The last
+  test fails on the previous `validation.py`. CI runs it under pytest and directly.
 - **A "Scope and status" section in the README**, recording that this is a public
   subset of a larger internal validator and recording the vendored parser's exact
   provenance.
