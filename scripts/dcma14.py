@@ -160,9 +160,14 @@ def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile):
     """
     threshold = profile['dcma_logic_max_missing_pct']
     if not incomplete:
+        # The same keys as a scored run, so a caller reading the details never
+        # has to ask which branch produced them.
         return PASS, 0.0, threshold, 'No incomplete work tasks (vacuous pass).', {
-            'missing_count': 0, 'missing_pred_count': 0, 'missing_succ_count': 0,
-            'denominator': 0, 'examples': [],
+            'missing_count': 0, 'denominator': 0,
+            'missing_pred_count': 0, 'missing_pred_pct': 0.0,
+            'missing_succ_count': 0, 'missing_succ_pct': 0.0,
+            'missing_pred': [], 'missing_succ': [],
+            'examples': [],
         }
     # Network anchors are taken over the WHOLE work set (completed activities
     # included) — the network starts where the first activity started, not

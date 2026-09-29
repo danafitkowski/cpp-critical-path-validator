@@ -133,11 +133,11 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
   now list the activities missing a predecessor and those missing a successor
   separately (`missing_pred`, `missing_succ`), with their counts, their rates and the
   `denominator`, and its message gives both counts. A schedule with no incomplete
-  work passes with the counts at zero, and its details then carry neither the two
-  lists nor the rates. `missing_count` and `examples` still hold the union, and the
-  union rate is still the value graded against the threshold. On a progressed
-  schedule the rate can move either way: completed activities no longer count, and
-  the remaining work is the whole denominator.
+  work passes with the same details, every count and rate at zero and both lists
+  empty. `missing_count` and `examples` still hold the union, and the union rate is
+  still the value graded against the threshold. On a progressed schedule the rate
+  can move either way: completed activities no longer count, and the remaining work
+  is the whole denominator.
 
 - **CI is green again.** The last four runs (2026-05-16, 2026-08-19, 2026-08-22 and
   2026-08-23) each failed on exactly one step, the `xer_parser.py` drift check, in
@@ -285,12 +285,16 @@ finishes, and to what DCMA-14 #1 counts. No check has been added.
   `aace_31r_compliance` scores 100 less 20 per BLOCK finding and 5 per WARN finding,
   on that schedule and on one whose WBS is too shallow, which draws a BLOCK. The last
   test fails on the previous `validation.py`. CI runs it under pytest and directly.
-- **`tests/test_dcma14_logic.py`**, 4 tests on synthetic data for DCMA-14 #1: completed
+- **`tests/test_dcma14_logic.py`**, 9 tests on synthetic data for DCMA-14 #1: completed
   work left out of the denominator, a start milestone in the middle of the network
   counted while the one that starts it is excused, the missing-predecessor and
-  missing-successor counts reported separately, and a finish milestone with no
-  predecessor counted. Each fails on the previous check. CI runs it under pytest and
-  directly.
+  missing-successor counts reported separately, a finish milestone with no
+  predecessor counted, and the details of a schedule with no incomplete work. Each
+  of those five fails on the code before its fix. The other four are mutation
+  guards, each failing on a mutant the rest of the suite let through: the network's
+  start taken over all the work, an undated milestone never excused, an activity
+  missing both sides counted once, and completed work placed by its actual dates.
+  CI runs it under pytest and directly.
 - **A "Scope and status" section in the README**, recording that this is a public
   subset of a larger internal validator and recording the vendored parser's exact
   provenance.
