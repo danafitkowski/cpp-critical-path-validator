@@ -4,7 +4,30 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
-## Unreleased
+## v0.3.0 — 2026-09-29
+
+The second release of the day. A blank activity calendar id is read as the project
+calendar; the bundled parser is `cpp-xer-parser` v0.2.0, which decodes finish-first
+calendars; and four scoring rules come over from CPP's internal validator: a logic cycle
+grades RED, Check 2 is RED where there is no critical path, a RED check caps the overall
+rating, and Check 5 converts a lag on the calendar P6 measures it on. The README's
+examples run, and what it says about the public engine is corrected.
+
+**Results a caller may see move.** No function signature changed, but results did, each
+from wrong to right:
+
+- `overall_score`, `overall_rating` and `overall_confidence`: a schedule with a logic
+  cycle reads 0, RED, Unreliable, and a schedule with any RED check can no longer read
+  GREEN or High Confidence (the score itself is unchanged by the cap).
+- `checks.constraint_driven` is RED 0 where there is no critical path; it was GREEN 100.
+- `checks.lag_issues` and its recommendations read a lag in the working days of the
+  predecessor's calendar unless the file names the successor's.
+- Float, duration and lag on an activity with a blank calendar id are read on the
+  project calendar, and DCMA-14 #13 and Check 3's working-day test read a finish-first
+  calendar as the week it declares.
+- `dcma_14.calendar_resolution` no longer has a `note` key.
+
+New keys are listed under Added.
 
 ### Fixed
 
@@ -186,10 +209,16 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 - `dcma14.py` no longer carries the stand-in resolver it used while the bundled parser
   had none, so the `calendar_resolution` block no longer has the `note` key that
   stand-in added. The `work_day_delta` stand-in stays.
-- **Tests:** 16 new, all synthetic. `test_blank_task_calendar_2026_09_29.py` covers
-  Checks 1, 3, 5 and 7, the disclosure and the dashboard, and
-  `test_dcma14_blank_task_calendar_2026_09_26.py` covers DCMA-14. The suite is 181
-  tests.
+- **Tests:** 41 new, all synthetic, taking the suite from 165 at v0.2.0 to 206.
+  `test_blank_task_calendar_2026_09_29.py` covers Checks 1, 3, 5 and 7, the disclosure
+  and the dashboard for a blank calendar id, and
+  `test_dcma14_blank_task_calendar_2026_09_26.py` covers DCMA-14 (16 between them);
+  `test_readme_examples.py` runs the README (3);
+  `test_dcma14_finish_first_calendar_2026_09_29.py` covers the finish-first week (5);
+  `test_network_cycle_2026_09_29.py` covers cycles (5); and
+  `test_scoring_rules_and_lag_calendar_2026_09_29.py` covers Check 2 with no critical
+  path, the RED cap and the lag calendar (12). With cpp-cpm-engine at `CPM_ENGINE_PIN`
+  on the path, 205 pass and one skips; without it, 200 pass and 6 skip.
 
 ---
 
