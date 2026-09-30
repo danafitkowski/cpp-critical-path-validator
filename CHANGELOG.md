@@ -434,7 +434,8 @@ CPLI detail keys all changed. See the first entries under Changed.
   the old workflow today does not give the answer it gave in May.
   `scripts/xer_parser.py` was re-vendored byte for byte from
   `cpp-xer-parser` at [`5fc6c5e`](https://github.com/danafitkowski/cpp-xer-parser/commit/5fc6c5e034f4d740040c5655763612b320068743)
-  (the pin has since moved to `a8edac6`; see below),
+  (the pin moved to `a8edac6` later in this release, see below, and each release
+  since records the pin it moves to under Changed),
   and the hard check verifies the bundled copy against a recorded SHA-256 with no
   network access at all, so it is deterministic and cannot flake. A second, advisory
   step cross-checks the pin against GitHub and reports when upstream has moved past
@@ -762,7 +763,7 @@ Tested against `cpp-cpm-engine` v2.9.x (current as of 2026-05-16: v2.9.11+). Che
 
 Note on CI coverage: the public CI clones `cpp-cpm-engine` and places its `python_reference/` on `PYTHONPATH`, which proves the import wiring works. The OSS `python_reference/cpm.py` is an explicitly-stripped subset that does not currently expose `compute_lpm` (it omits surfaces beyond what the JS-Python crossval needs). The full LPM-confirmation contract is exercised inside the CPP internal `_cpp_common` tree where `compute_lpm` is bundled. Once `cpp-cpm-engine`'s OSS python_reference is expanded to include `compute_lpm`, the public CI will exercise the full contract automatically — no validator change required, the test will stop skipping.
 
-The bundled `scripts/xer_parser.py` mirrors `cpp-xer-parser` v0.1.x, verified in CI. See Unreleased for how that check works now.
+The bundled `scripts/xer_parser.py` mirrors `cpp-xer-parser` v0.1.x, verified in CI. For how that check works now, see "CI is green again" under Fixed in v0.2.0: an offline SHA-256 pin, plus an advisory upstream comparison that cannot fail the build. Each later release records the pin it moves to under Changed.
 
 ### Companion repos
 
