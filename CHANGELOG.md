@@ -4,6 +4,47 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## v0.4.0 — 2026-10-10
+
+The bundled parser is `cpp-xer-parser` v0.3.0, which converts hours to days on the hours
+a calendar's shifts work when every working day of its week works the same number of
+hours and `day_hr_cnt` says otherwise. That is how P6 schedules, measured on Primavera
+P6 Professional 23.12.1's own F9. Nothing else changes.
+
+**Results a caller may see move.** No function signature changed. On a calendar of that
+shape, and only there, every hours-to-days conversion the validator makes moves, from
+wrong to right: float, remaining duration and lag in working days, so Checks 1, 5 and 7,
+the LPM cross-check, DCMA-14 #6, #8 and #13, and the scores, ratings and
+recommendations that read them.
+
+**Why a minor release.** Before 1.0 this project moves the minor number for a release
+that changes results a caller already reads.
+
+### Changed
+
+- **The bundled parser files are re-vendored** from `cpp-xer-parser` at its release
+  [`v0.3.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.3.0),
+  commit `97b765b`. P6 schedules a duration in hours against the calendar's shifts;
+  `day_hr_cnt` ("Hours per Day") only converts hours to days for display. Scheduled with
+  F9 on 10-Oct-2026, a Monday-Saturday 07:00-17:00 calendar declaring 8 ran a 40 h
+  activity over four days. The parser's `get_calendar_map` now gives such a calendar
+  the shifts' `hours_per_day` and keeps the file's figure as `declared_hours_per_day`;
+  a week whose working days work different hours keeps `day_hr_cnt`. On a Monday-Friday
+  calendar whose shifts work ten hours and which declares 8, 20 h of float read as 2.5
+  working days and now read as 2, a -100 h critical chain as -10 days, not -12.5, and
+  Check 7 scores 40, as on the same calendar declaring 10, not 55.
+
+  `xer_parser.py` changes, so `XER_PIN` and `XER_SHA256` move together.
+  `validation.py` and `config_profiles.py` are byte-identical to v0.2.1's.
+
+### Testing
+
+- `tests/test_shift_hours_calendar_2026_10_10.py` has 4 synthetic tests. Against the
+  v0.2.1 parser, 3 of them fail. CI runs the file under pytest and directly. The suite
+  is 222 tests.
+
+---
+
 ## v0.3.1 — 2026-09-29
 
 The validator gives the embedded DCMA-14 report's worst severity at the top level of its

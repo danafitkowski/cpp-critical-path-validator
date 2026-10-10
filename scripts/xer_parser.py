@@ -26,6 +26,7 @@ import json
 import math
 import os
 import re
+import warnings
 from datetime import datetime, timedelta
 from collections import defaultdict, OrderedDict
 
@@ -102,6 +103,7 @@ __all__ = [
     'parse_calendar_data', 'get_calendar_map',
     'get_work_days_between', 'duration_hours_to_days',
     'resolve_task_calendars', 'with_resolved_calendars', 'calendar_resolution_block',
+    'calendar_shift_hours', 'CalendarShiftHoursWarning',
     # Cross-reference
     'build_wbs_map', 'build_resource_map',
     'build_predecessor_map', 'build_activity_code_map', 'build_udf_map',
@@ -730,11 +732,119 @@ def _xer_exception_serial_to_iso(serial_raw):
     return ''
 
 
+# A time slot with its times captured, in either P6 field order (see
+# _TIME_SLOT_RE): groups 1-4 are start-first, 5-8 finish-first.
+_TIME_SLOT_TIMES_RE = re.compile(
+    r'\((?:s\|(\d{1,2}):(\d{2})\|f\|(\d{1,2}):(\d{2})'
+    r'|f\|(\d{1,2}):(\d{2})\|s\|(\d{1,2}):(\d{2}))\)'
+)
+
+
+class CalendarShiftHoursWarning(UserWarning):
+    """A CALENDAR row's shifts work a different number of hours a day from its
+    day_hr_cnt ("Hours per Day"), the same on every working day of its week.
+
+    P6 schedules durations against the shifts; day_hr_cnt only converts hours
+    to days for display. ``get_calendar_map`` takes hours_per_day from the
+    shifts for such a calendar and keeps the file's figure as
+    ``declared_hours_per_day``; ``calendar_shift_hours(cal_map)`` lists them.
+    Measured 10-Oct-2026 on Primavera P6 Professional 23.12.1's own F9: a
+    Monday-Saturday 07:00-17:00 calendar declaring 8 ran a 40 h activity over
+    four days.
+    """
+
+
+def _shift_hours_by_weekday(clndr_data_str):
+    """Hours each working weekday's shifts work, from a clndr_data blob's
+    DaysOfWeek block: {weekday 0=Sun..6=Sat: hours}, working days only.
+
+    Slots count in either P6 field order; a finish of 00:00 is midnight at the
+    end of the day. Empty when the blob has no DaysOfWeek block or no day in it
+    carries a time slot (the older bare-day encodings carry no hours)."""
+    text = clndr_data_str or ''
+    idx = text.find('DaysOfWeek')
+    if idx < 0:
+        return {}
+    open_idx = text.find('(', idx + len('DaysOfWeek'))
+    if text[open_idx:open_idx + 2] == '()':
+        open_idx = text.find('(', open_idx + 2)
+    if open_idx < 0:
+        return {}
+    depth, block = 0, None
+    for k in range(open_idx, len(text)):
+        if text[k] == '(':
+            depth += 1
+        elif text[k] == ')':
+            depth -= 1
+            if depth == 0:
+                block = text[open_idx + 1:k]
+                break
+    if block is None:
+        return {}
+    out = {}
+    i = 0
+    while i < len(block):
+        m = re.match(r'\(0\|\|(\d)\(\)', block[i:])
+        if not m:
+            i += 1
+            continue
+        day_idx = int(m.group(1)) - 1
+        depth, j = 0, i
+        while j < len(block):
+            if block[j] == '(':
+                depth += 1
+            elif block[j] == ')':
+                depth -= 1
+                if depth == 0:
+                    j += 1
+                    break
+            j += 1
+        minutes = 0
+        for slot in _TIME_SLOT_TIMES_RE.finditer(block[i:j]):
+            g = slot.groups()
+            if g[0] is not None:
+                start = int(g[0]) * 60 + int(g[1])
+                finish = int(g[2]) * 60 + int(g[3])
+            else:
+                finish = int(g[4]) * 60 + int(g[5])
+                start = int(g[6]) * 60 + int(g[7])
+            if finish == 0:
+                finish = 24 * 60
+            if finish > start:
+                minutes += finish - start
+        if minutes and 0 <= day_idx <= 6:
+            out[day_idx] = minutes / 60.0
+        i = j
+    return out
+
+
+def calendar_shift_hours(cal_map):
+    """Return the calendars whose hours_per_day was taken from their shifts.
+
+    Each entry: {'clndr_id', 'clndr_name', 'hours_per_day',
+    'declared_hours_per_day'}. Empty when every calendar's shifts work the
+    hours its day_hr_cnt declares (or its week's working days differ)."""
+    return [
+        {
+            'clndr_id': c.get('clndr_id', ''),
+            'clndr_name': c.get('clndr_name', ''),
+            'hours_per_day': c.get('hours_per_day'),
+            'declared_hours_per_day': c.get('declared_hours_per_day'),
+        }
+        for c in cal_map.values()
+        if isinstance(c, dict) and c.get('declared_hours_per_day') is not None
+    ]
+
+
 def get_calendar_map(data):
     """
     Build a calendar lookup: clndr_id → parsed calendar info.
     Includes hours_per_day from the CALENDAR table's day_hr_cnt field, and
-    the row's default_flag as the file writes it.
+    the row's default_flag as the file writes it. When every working day of
+    the calendar's week works the same hours and day_hr_cnt says otherwise,
+    hours_per_day is the hours the shifts work, as P6 schedules them; the
+    file's figure is kept as declared_hours_per_day, and a
+    CalendarShiftHoursWarning names the calendar.
     """
     calendars = get_table(data, 'CALENDAR')
     cal_map = {}
@@ -755,6 +865,26 @@ def get_calendar_map(data):
             parsed['hours_per_day'] = float(day_hr)
         except (ValueError, TypeError):
             parsed['hours_per_day'] = 8.0
+        # The hours the shifts work, when every working day of the week works
+        # the same and day_hr_cnt says otherwise: P6 schedules on the shifts
+        # (a Monday-Saturday 07:00-17:00 calendar declaring 8 ran 40 h over
+        # four days on its own F9), and every hours-to-days conversion reads
+        # this field. A week of unequal days keeps day_hr_cnt.
+        _hrs = {round(h, 6) for h in
+                _shift_hours_by_weekday(cal.get('clndr_data', '')).values()}
+        if len(_hrs) == 1:
+            _h = _hrs.pop()
+            if _h > 0 and abs(_h - parsed['hours_per_day']) > 1e-6:
+                parsed['declared_hours_per_day'] = parsed['hours_per_day']
+                parsed['hours_per_day'] = float(_h)
+                warnings.warn(
+                    'CALENDAR {id} {name!r} works {h:g} h on every working '
+                    'day but declares day_hr_cnt {d:g}; hours are '
+                    'converted to days on the {h:g} h its shifts work, '
+                    'as P6 schedules them.'.format(
+                        id=clndr_id, name=parsed['clndr_name'], h=_h,
+                        d=parsed['declared_hours_per_day']),
+                    CalendarShiftHoursWarning, stacklevel=2)
 
         # Hours per week
         week_hr = cal.get('week_hr_cnt', '40')
