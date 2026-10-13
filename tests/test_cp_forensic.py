@@ -33,6 +33,16 @@ def run_test(name, fn):
         return False
 
 
+def _week(start, finish, days):
+    """A P6 clndr_data week: one period a day on the given days (1 = Sunday).
+    A 10- or 24-hour record carries its week: an EMPTY record is P6's
+    internal 8-hour Standard whatever hours it declares (engine v2.10.1, P6
+    probe ZZ-CPP-EMPTYCAL2), so it no longer stands in for one."""
+    body = ''.join('(0||%d()(%s))' % (d, ('(0||0(s|%s|f|%s)())' % (start, finish)) if d in days else '')
+                   for d in range(1, 8))
+    return '(0||CalendarData()((0||DaysOfWeek()(' + body + '))(0||Exceptions()())))'
+
+
 def _build_data(lag_hrs, hours_per_day=8.0):
     """Build minimal XER data with one negative-lag relationship on the CP.
 
@@ -55,7 +65,9 @@ def _build_data(lag_hrs, hours_per_day=8.0):
                     'week_hr_cnt': str(hours_per_day * 5),
                     'default_flag': 'Y',
                     'clndr_type': 'CA_Base',
-                    'clndr_data': '',
+                    'clndr_data': ('' if hours_per_day == 8.0 else
+                                   _week('00:00', '00:00', range(1, 8)) if hours_per_day == 24.0 else
+                                   _week('07:00', '%02d:00' % (7 + int(hours_per_day)), (2, 3, 4, 5, 6))),
                 }],
             },
             'TASK': {

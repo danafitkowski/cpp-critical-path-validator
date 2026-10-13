@@ -4,6 +4,59 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## v0.5.0 — 2026-10-13
+
+The bundled parser is `cpp-xer-parser` v0.4.0, which reads the data date and an empty
+calendar record the way P6 schedules from them, measured on Primavera P6 Professional
+23.12.1's own F9. The results say where their data date came from.
+
+**Results a caller may see move.** No function signature changed. Two kinds of file move,
+from wrong to right: one whose activities sit on an empty calendar record that declares
+other than eight hours a day, where every hours-to-days conversion moves (float,
+remaining duration and lag in working days, so Checks 1, 5 and 7, DCMA-14 #6, #8 and
+#13, and the scores, ratings and recommendations that read them); and one whose data
+date is blank or filed on an earlier day than its planned start, where `data_date` and
+every check that reads it move.
+
+**Why a minor release.** Before 1.0 this project moves the minor number for a release
+that changes results a caller already reads.
+
+### Changed
+
+- **The bundled parser files are re-vendored** from `cpp-xer-parser` at its release
+  [`v0.4.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.4.0),
+  commit `36879dc`.
+  - An empty calendar record (no `clndr_data`) is P6's internal Standard: Monday to
+    Friday, 08:00-16:00, eight hours a day, no holidays, whatever `day_hr_cnt` declares.
+    Records declaring 10, 6 and 24 hours ran the same 08:00-16:00 days on P6's F9. On an
+    empty record declaring 10, 20 h of float read as 2 working days and now read as 2.5,
+    and a -100 h critical chain as -12.5 days, not -10: the network scores as on an empty
+    record declaring 8.
+  - A blank `PROJECT.last_recalc_date` is the project's planned start, and a data date
+    filed on an earlier day than the planned start is lifted to it, as P6 lifts it when
+    it opens the project.
+
+  `xer_parser.py` changes, so `XER_PIN` and `XER_SHA256` move together.
+  `validation.py` and `config_profiles.py` are byte-identical to v0.4.0's.
+- **CI runs against `cpp-cpm-engine` v2.10.1** (`CPM_ENGINE_PIN` `6cebfdb`).
+- **The 10- and 24-hour calendars in `tests/test_cp_forensic.py` carry their week.** An
+  empty record no longer stands in for one.
+
+### Added
+
+- **`results['data_date_source']`**: `PROJECT.last_recalc_date` when the data date is the
+  file's own; otherwise `PROJECT.plan_start_date` with the reason, naming the filed date
+  when it was lifted. The function is CPP's internal one, AST-identical.
+
+### Testing
+
+- `tests/test_p6_rules_2026_10_13.py` has 5 synthetic tests, all failing against v0.4.0.
+  CI runs the file under pytest and directly. The suite is 227 tests: 221 pass and 6 skip
+  without the engine, and with `cpp-cpm-engine` v2.10.1's `python_reference` on the path
+  226 pass and 1 skips, the LPM cross-check, which the public engine does not ship.
+
+---
+
 ## v0.4.0 — 2026-10-10
 
 The bundled parser is `cpp-xer-parser` v0.3.0, which converts hours to days on the hours
