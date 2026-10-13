@@ -294,6 +294,26 @@ def _calendar_resolution(task_cals, work_tasks):
 # the predecessor's or the successor's calendar, and a token it does not
 # implement (the project or the 24-hour calendar) falls back to the
 # successor's.
+
+
+def _data_date_source(data, project):
+    """Where the run's data date came from. xer-parser reads a blank
+    PROJECT.last_recalc_date as the project's planned start, as P6 schedules
+    it (12-Oct-2026), and lists each fill in data['data_date_filled']; the
+    report then says so rather than presenting the date as filed. Since
+    engine v2.10.1 (13-Oct-2026) the same list carries a filed data date on
+    an earlier day than the planned start, lifted to it as P6 lifts it when
+    it opens the project; that entry keeps the filed date in
+    filed_data_date, and the source names it rather than calling it blank."""
+    pid = project.get('proj_id', '')
+    for f in (data.get('data_date_filled') or []):
+        if f.get('proj_id') != pid:
+            continue
+        if f.get('filed_data_date'):
+            return ('PROJECT.plan_start_date (the filed PROJECT.last_recalc_date, %s, is on an '
+                    'earlier day; P6 lifts the data date to the planned start)' % f['filed_data_date'])
+        return 'PROJECT.plan_start_date (blank PROJECT.last_recalc_date, read as P6 schedules it)'
+    return 'PROJECT.last_recalc_date'
 _LAG_CAL_ALIASES = {
     'rcal_Predecessor': 'predecessor',
     'rcal_Successor': 'successor',
@@ -551,6 +571,7 @@ def validate_critical_path(data, project_index=0, profile='commercial',
     results = {
         'project_name': proj_name,
         'data_date': data_date,
+        'data_date_source': _data_date_source(data, project),
         'analysis_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
         'total_activities': len(work_tasks),
         'complete': len(complete_tasks),

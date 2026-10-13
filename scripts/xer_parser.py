@@ -436,7 +436,62 @@ def parse_xer(filepath, encoding=None):
             result['tables'][current_table]['records'].append(record)
             continue
 
+    result['data_date_filled'] = _fill_blank_data_dates(result)
     return result
+
+
+def _fill_blank_data_dates(result):
+    """Read a blank data date as the project's planned start, as P6 does.
+
+    P6 schedules "from the project data date, using the project start date as
+    the initial data date" (P6 Professional 23.12 help). Measured 12-Oct-2026
+    on the two P6-scheduled projects in the local P6 database whose
+    PROJECT.last_recalc_date is blank: every unconstrained not-started activity
+    with no predecessor starts on PROJECT.plan_start_date, and handed that date
+    the engine matches P6 on all 437 open activities of the first. Left blank,
+    every consumer that hands the engine PROJECT.last_recalc_date scheduled
+    from the engine's epoch instead.
+
+    The blank is filled in place so every consumer reads the data date P6
+    used. Returns one entry per filled project ({proj_id, last_recalc_date,
+    filled_from}) for disclosure: the file's own value was blank. A blank with
+    no planned start stays blank.
+
+    A filed data date EARLIER than the planned start is lifted to it the same
+    way (13-Oct-2026): P6 lifts the data date to a later planned start when it
+    opens the project and schedules from there, every completed activity's
+    retained-logic date included (P6 probe ZZ-CPP-XZ: data date 28-Aug, planned
+    start 01-Sep, P6 shows and schedules 01-Sep; the 2026-09-23 probes had to
+    move their planned start back for that reason). The entry then carries the
+    filed date as filed_data_date. Only a planned start on a LATER DAY lifts a
+    filed data date: the measured case; a planned start later the same day (a
+    00:00 data date beside an 08:00 start) is the same working instant on any
+    calendar that opens at or after it, and is left as filed.
+    """
+    filled = []
+    for rec in result.get('tables', {}).get('PROJECT', {}).get('records', []):
+        dd = (rec.get('last_recalc_date') or '').strip()
+        start = (rec.get('plan_start_date') or '').strip()
+        if not start:
+            continue
+        if dd:
+            # 'YYYY-MM-DD ...' strings, so the string order is the date order
+            if start[:10] > dd[:10]:
+                rec['last_recalc_date'] = start
+                filled.append({'proj_id': rec.get('proj_id', ''), 'last_recalc_date': start,
+                               'filled_from': 'plan_start_date', 'filed_data_date': dd})
+            continue
+        rec['last_recalc_date'] = start
+        filled.append({'proj_id': rec.get('proj_id', ''), 'last_recalc_date': start,
+                       'filled_from': 'plan_start_date'})
+    return filled
+
+
+# XER date columns conventionally end in '_date'. A non-empty cell that does
+# not parse as a P6 date (YYYY-MM-DD prefix) is silently mishandled downstream
+# (truncated by `[:10]`, then dropped/coerced by the CPM) — producing a
+# wrong-but-valid finish and a silently-wrong forensic number. Validate at the
+# source so every parse_xer consumer can surface it.
 
 
 def get_table(data, table_name):
@@ -823,7 +878,9 @@ def calendar_shift_hours(cal_map):
 
     Each entry: {'clndr_id', 'clndr_name', 'hours_per_day',
     'declared_hours_per_day'}. Empty when every calendar's shifts work the
-    hours its day_hr_cnt declares (or its week's working days differ)."""
+    hours its day_hr_cnt declares (or its week's working days differ). An
+    empty record also keeps its declared figure, but it has no shifts: P6
+    schedules it on its internal Standard, so it is not listed here."""
     return [
         {
             'clndr_id': c.get('clndr_id', ''),
@@ -833,6 +890,7 @@ def calendar_shift_hours(cal_map):
         }
         for c in cal_map.values()
         if isinstance(c, dict) and c.get('declared_hours_per_day') is not None
+        and not c.get('empty_record')
     ]
 
 
@@ -840,7 +898,10 @@ def get_calendar_map(data):
     """
     Build a calendar lookup: clndr_id → parsed calendar info.
     Includes hours_per_day from the CALENDAR table's day_hr_cnt field, and
-    the row's default_flag as the file writes it. When every working day of
+    the row's default_flag as the file writes it. An empty record is P6's
+    internal Standard (Monday to Friday, 08:00-16:00, eight hours, no
+    holidays) whatever day_hr_cnt says, flagged empty_record, with the
+    declared figure in declared_hours_per_day. When every working day of
     the calendar's week works the same hours and day_hr_cnt says otherwise,
     hours_per_day is the hours the shifts work, as P6 schedules them; the
     file's figure is kept as declared_hours_per_day, and a
@@ -851,6 +912,33 @@ def get_calendar_map(data):
 
     for cal in calendars:
         clndr_id = cal.get('clndr_id', '')
+        # An EMPTY record: P6 schedules on its internal Standard, Monday to
+        # Friday 08:00-16:00 with no exceptions, the base calendar's holidays
+        # NOT applied, whatever hours a day the record declares. Measured on
+        # Primavera P6 Professional 23.12.1's own F9 of synthetic probes
+        # (13-Oct-2026): a task 40 h from a Friday works the Labour Day
+        # holiday, and records declaring 10, 6 and 24 h ran the same
+        # 08:00-16:00 days. The declared figure is kept in
+        # declared_hours_per_day; calendar_shift_hours does not list the
+        # record, which has no shifts.
+        if not (cal.get('clndr_data') or '').strip():
+            try:
+                _hpd_decl = float(cal.get('day_hr_cnt') or 8)
+            except (TypeError, ValueError):
+                _hpd_decl = 8.0
+            cal_map[clndr_id] = {
+                'work_days': [1, 2, 3, 4, 5],
+                'work_day_names': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+                'holidays': [], 'special_workdays': [], 'exceptions': [],
+                'hours_per_day': 8.0, 'raw': '',
+                'clndr_id': clndr_id, 'clndr_name': cal.get('clndr_name', ''),
+                'default_flag': cal.get('default_flag', '') or '',
+                'hours_per_week': 40.0,
+                'p6_fallback': True, 'empty_record': True,
+                'declared_hours_per_day': _hpd_decl,
+            }
+            continue
+
         parsed = parse_calendar_data(cal.get('clndr_data', ''))
         parsed['clndr_id'] = clndr_id
         parsed['clndr_name'] = cal.get('clndr_name', '')
@@ -1426,6 +1514,43 @@ def build_resource_map(data):
         task_resources[task_id].append(combined)
 
     return dict(task_resources)
+
+
+def resource_dependent_assignments(data):
+    """``{task_id: [assignment, ...]}``: every TASKRSRC row as the engine schedules it on a resource dependent
+    activity (cpp-cpm-engine v2.10.1; P6 probes ZZ-CPP-RSRC 1-3, 13-Oct-2026).
+
+    Each assignment: ``rsrc_id``; ``clndr_id``, the resource's calendar (RSRC.clndr_id; None for a role or a
+    resource the file does not carry, which then works the activity's calendar); ``remaining_hours``, remaining
+    units / remaining units per hour, the duration P6 schedules it for; ``lag_hours``, the remaining lag (the
+    planned lag when that is blank); ``driving``, False only where Drive Activity Dates (rollup_dates_flag) is N.
+    """
+    def num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    rsrc_cal = {(r.get('rsrc_id') or '').strip(): (r.get('clndr_id') or '').strip() or None
+                for r in get_table(data, 'RSRC')}
+    out = {}
+    for r in get_table(data, 'TASKRSRC'):
+        tid = (r.get('task_id') or '').strip()
+        if not tid:
+            continue
+        rid = (r.get('rsrc_id') or '').strip()
+        qty = num(r.get('remain_qty')) or 0.0
+        rate = num(r.get('remain_qty_per_hr')) or 0.0
+        lag = num(r.get('relag_drtn_hr_cnt'))
+        if lag is None:
+            lag = num(r.get('target_lag_drtn_hr_cnt')) or 0.0
+        out.setdefault(tid, []).append({
+            'rsrc_id': rid, 'clndr_id': rsrc_cal.get(rid) if rid else None,
+            'remaining_hours': (qty / rate) if rate > 0 else 0.0,
+            'lag_hours': lag,
+            'driving': (r.get('rollup_dates_flag') or 'Y').strip().upper() != 'N',
+        })
+    return out
 
 
 def build_predecessor_map(data):

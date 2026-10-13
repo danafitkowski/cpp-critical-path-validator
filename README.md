@@ -20,7 +20,7 @@ This is v0.4.0, and it is a public subset. Critical Path Partners maintains a la
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
-`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.3.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.3.0) (commit [`97b765b`](https://github.com/danafitkowski/cpp-xer-parser/commit/97b765b9d057e81513674e8d8d31fa05a833d6f7)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too, so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.4.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.4.0) (commit [`36879dc`](https://github.com/danafitkowski/cpp-xer-parser/commit/36879dc0e16184c50825c5fd325ae8113d58c956)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too, so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 ---
 
@@ -159,6 +159,8 @@ name.
 ## Blank activity calendars
 
 A schedule converted from MS Project (by MPXJ, for example) leaves `TASK.clndr_id` blank for every task without a task-level calendar. A blank id means the project calendar, and the validator reads it that way: before any check runs, each activity takes its own calendar, else the project's (`PROJECT.clndr_id`), else the calendar flagged `default_flag = 'Y'`. The parsed data is not modified.
+
+`results['data_date']` is the date P6 schedules from. The bundled parser reads a blank `PROJECT.last_recalc_date` as the project's planned start, and lifts a data date filed on an earlier day than the planned start to it, as P6 does when it opens the project; `results['data_date_source']` says which: `PROJECT.last_recalc_date` when the date is the file's own, otherwise `PROJECT.plan_start_date` with the reason, naming the filed date when it was lifted.
 
 `results['calendar_resolution']` says what happened, and `results['dcma_14']['calendar_resolution']` says the same for the activities DCMA-14 assessed. It gives the count of blank ids resolved, the calendar they were resolved onto, and every activity left with no usable calendar. An activity is left without one when its id is blank and the file names no project or default calendar, or when it names a calendar the file does not declare. Such activities draw a High "Activity Calendar" recommendation and a dashboard section that lists them, because their float and duration can only be read at a flat 8 h/day.
 
