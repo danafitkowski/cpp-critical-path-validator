@@ -37,6 +37,9 @@ from xer_parser import (  # noqa: E402
     ACTIVE_STATUS,
     NOT_STARTED_STATUS,
 )
+# The driving path traced on the file's stored dates (scripts/driving_path.py,
+# CPP's internal tracer, vendored): Check 2 reads the longest path from it.
+from driving_path import trace_schedule as _trace_schedule  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -343,9 +346,15 @@ def _detect_schedule_options(data, pid):
     (rcal_Predecessor). Returns ``relationship_lag_calendar`` (the token),
     ``relationship_lag_calendar_source`` (how it was determined) and
     ``lag_calendar_role`` ('predecessor' or 'successor': the calendar Check 5
-    converts lag hours to days on). The internal version also reads the
-    scheduling mode and the project's Must Finish By from the same row;
-    nothing in this repository uses them, so they are not read here.
+    converts lag hours to days on), and the two settings Check 2's driving-
+    path trace schedules with (28-Oct-2026), decoded as the internal version
+    decodes them: ``schedule_mode`` ('retained_logic' or 'progress_override';
+    sched_progress_override=Y wins, then sched_retained_logic=Y, P6's default
+    retained logic otherwise) and ``ss_lag_from`` (P6's "Calculate
+    start-to-start lag from": sched_lag_early_start_flag Y = 'early_start',
+    P6's default, N = 'actual_start'), each with a ``*_source``. The internal
+    version also reads the project's Must Finish By from the same row;
+    nothing in this repository uses it, so it is not read here.
     """
     rows = get_table(data, 'SCHEDOPTIONS')
     row = None
@@ -361,6 +370,12 @@ def _detect_schedule_options(data, pid):
         lag_source = (
             'SCHEDOPTIONS table absent from export; P6 default '
             '(predecessor calendar, rcal_Predecessor) assumed')
+        mode = 'retained_logic'
+        mode_source = ('SCHEDOPTIONS table absent from export; P6 default '
+                       '(retained logic) assumed')
+        ss_lag_from = 'early_start'
+        ss_source = ('SCHEDOPTIONS table absent from export; P6 default '
+                     '(start-to-start lag from Early Start) assumed')
     else:
         lag_raw = (row.get('sched_calendar_on_relationship_lag') or '').strip()
         if lag_raw:
@@ -372,10 +387,46 @@ def _detect_schedule_options(data, pid):
             lag_source = (
                 'SCHEDOPTIONS sched_calendar_on_relationship_lag blank; P6 '
                 'default (predecessor calendar, rcal_Predecessor) assumed')
+        retained = (row.get('sched_retained_logic') or '').strip().upper()
+        override = (row.get('sched_progress_override') or '').strip().upper()
+        if override == 'Y':
+            mode = 'progress_override'
+            mode_source = 'SCHEDOPTIONS sched_progress_override=Y'
+        elif retained == 'Y':
+            mode = 'retained_logic'
+            mode_source = 'SCHEDOPTIONS sched_retained_logic=Y'
+        elif retained == 'N' and override == 'N':
+            mode = 'retained_logic'
+            mode_source = (
+                'SCHEDOPTIONS sched_retained_logic=N and '
+                'sched_progress_override=N (P6 "Actual Dates" mode, which this '
+                'engine does not implement); computed under retained logic — '
+                'disclosed, not silently equivalent')
+        else:
+            mode = 'retained_logic'
+            mode_source = (
+                'SCHEDOPTIONS present but scheduling-mode flags blank/'
+                'unrecognized (sched_retained_logic=%s, '
+                'sched_progress_override=%s); P6 default (retained logic) '
+                'assumed' % (retained or 'absent', override or 'absent'))
+        ss_raw = (row.get('sched_lag_early_start_flag') or '').strip().upper()
+        if ss_raw in ('Y', 'N'):
+            ss_lag_from = 'early_start' if ss_raw == 'Y' else 'actual_start'
+            ss_source = 'SCHEDOPTIONS sched_lag_early_start_flag=%s' % ss_raw
+        else:
+            ss_lag_from = 'early_start'
+            ss_source = (
+                'SCHEDOPTIONS sched_lag_early_start_flag blank/unrecognized (%s); '
+                'P6 default (start-to-start lag from Early Start) assumed'
+                % (ss_raw or 'absent'))
     return {
         'relationship_lag_calendar': lag_token,
         'relationship_lag_calendar_source': lag_source,
         'lag_calendar_role': _resolve_lag_cal_role(lag_token),
+        'schedule_mode': mode,
+        'schedule_mode_source': mode_source,
+        'ss_lag_from': ss_lag_from,
+        'ss_lag_from_source': ss_source,
     }
 
 
@@ -603,8 +654,9 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         'cycle_detected': cycle_detected,
         'cycles_found': cycles_found_codes,
         'cycles_found_task_ids': cycles_found,
-        # The relationship-lag calendar Check 5 converted lags on, with how
-        # it was determined.
+        # The relationship-lag calendar Check 5 converted lags on, and the
+        # scheduling mode and start-to-start lag setting Check 2's trace ran
+        # with, each with how it was determined.
         'schedule_options': _sched_opts,
         # Blank TASK.clndr_id resolution: what resolved onto the project
         # calendar, and what has no usable calendar at all.
@@ -802,14 +854,49 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             'affected_activity': a['task_code'],
         })
 
-    # ── LPM-confirmation: math-grounded false-CP detection ────────────────────
-    # Build lightweight activity/relationship lists for compute_lpm.
+    # ── Longest-path confirmation: zero float that is not on the longest path ─
+    # P6 finds the longest path by "identifying the activities that have an
+    # early finish equal to the latest calculated early finish for the project
+    # and tracing all driving relationships for those activities back to the
+    # project start date" (P6 Professional 23.12 help, General tab - Schedule
+    # Options dialog box). That is the driving path traced on the file's own
+    # stored dates (driving_path.trace_schedule to the minute: every tie, lags
+    # and SS/FF/SF offsets laid on their calendars, level of effort walked
+    # through). A zero-float activity off it is critical by float alone: a
+    # constraint, a Must Finish By or an open end in its chain, or
+    # out-of-sequence progress, rather than the driving logic. The trace needs
+    # cpp-cpm-engine's calendar arithmetic on the path.
+    #
+    # Until 28-Oct-2026 the path was rebuilt with cpm.compute_lpm, which lays
+    # no lag. On a schedule whose path runs through lagged SS/FF overlaps it
+    # ended on another chain and flagged activities P6 has on its Longest
+    # Path. It still runs, below, when the stored dates cannot be traced;
+    # ``lpm_basis`` says which ran.
+    try:
+        _lp_traced = _trace_schedule(data, target_proj_id, options=_sched_opts,
+                                     cal_map=cal_map, resolution='minute')
+    except Exception as _e:  # noqa: BLE001 - fall back to the duration-only path
+        _lp_traced = {'traced': False, 'reason': 'the trace failed (%s)' % _e}
+    if _lp_traced.get('traced'):
+        _lpm_basis = 'traced'
+        _lpm_trace_reason = ''
+        # Driving relationships only: work joined to the path because it
+        # cannot slip is not on P6's Longest Path.
+        _lp_codes = (set(_lp_traced.get('codes') or ())
+                     - set(_lp_traced.get('joined_by_slack') or ()))
+    else:
+        _lpm_basis = 'duration-only'
+        _lpm_trace_reason = _lp_traced.get('reason') or 'the trace was not run'
+        _lp_codes = None
+
+    # Duration-only fallback: lightweight activity/relationship lists for
+    # compute_lpm.
     # We use the P6-precomputed total_float_hr_cnt as the TFM source (not a
     # freshly-recomputed TF) because P6's TF reflects constraint-pinned dates and
     # retained-logic/out-of-sequence effects that the engine would re-derive
-    # differently. The LPM DP is pure duration accumulation (AACE 49R-06) —
-    # constraints are invisible to it — so comparing P6-TF against LPM membership
-    # gives the strongest forensic signal for constraint-driven false-CP.
+    # differently. compute_lpm accumulates durations only: no constraint, no
+    # calendar and no lag, so a lagged or SS/FF overlap on the real path can
+    # move its path elsewhere (the reason the traced path above is preferred).
     #
     # duration_days = remain_drtn_hr_cnt / hours_per_day on the activity's calendar
     # (fall back to 8 h/d when the calendar is missing; LPM is duration-only, so
@@ -839,52 +926,191 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             'from_code': fc,
             'to_code': tc,
             'type': _PRED_TYPE_MAP.get(p.get('pred_type', ''), 'FS'),
-            'lag_days': 0.0,  # LPM ignores lag per AACE 49R-06
+            'lag_days': 0.0,  # compute_lpm lays no lag (duration-only)
         })
 
-    try:
-        from cpm import compute_lpm as _compute_lpm  # noqa: E402  (already on sys.path)
-        _lpm_result = _compute_lpm(_lpm_acts, _lpm_rels)
-        _lpm_codes_set = set(_lpm_result['codes'])
-
-        # P6 TFM: activities flagged as critical by P6 (total_float_hr_cnt ≤ 0),
-        # filtered to incomplete work tasks — matches the Check 1 cp_activities list.
-        _p6_tfm_ids = {a['task_id'] for a in cp_activities}  # already TF≤0 incomplete
-
-        # only_TFM: in P6 TFM but NOT on LPM. These are the math-grounded
-        # false-CP candidates (AACE 49R-06).
+    # P6 TFM: activities flagged as critical by P6 (total_float_hr_cnt ≤ 0),
+    # filtered to incomplete work tasks — matches the Check 1 cp_activities list.
+    _p6_tfm_ids = {a['task_id'] for a in cp_activities}  # already TF≤0 incomplete
+    if _lp_codes is not None:
+        # The trace keys activities by task_code (task_id when blank).
         _lpm_confirmed_false_cp = sorted(
-            tid for tid in _p6_tfm_ids if tid not in _lpm_codes_set
+            tid for tid in _p6_tfm_ids
+            if ((task_map.get(tid, {}).get('task_code') or '').strip() or tid)
+            not in _lp_codes
         )
         _lpm_error = None
-    except Exception as _e:
-        _lpm_confirmed_false_cp = []
-        _lpm_error = str(_e)
+    else:
+        try:
+            from cpm import compute_lpm as _compute_lpm  # noqa: E402  (already on sys.path)
+            _lpm_result = _compute_lpm(_lpm_acts, _lpm_rels)
+            _lpm_codes_set = set(_lpm_result['codes'])
 
-    # Add LPM-confirmed false-CP recommendations (one per activity).
+            # only_TFM: in P6 TFM but NOT on the duration-only path.
+            _lpm_confirmed_false_cp = sorted(
+                tid for tid in _p6_tfm_ids if tid not in _lpm_codes_set
+            )
+            _lpm_error = None
+        except Exception as _e:
+            _lpm_confirmed_false_cp = []
+            _lpm_error = str(_e)
+
+    # Map each task_id to whether it is reached by a lag-bearing or non-FS
+    # (SS/FF/SF) incoming edge. The duration-only fallback rebuilds the longest
+    # path with lag_days hardcoded to 0, so stripping a non-zero lag or an
+    # SS/FF/SF offset can shorten the path through an activity and drop it from
+    # that path even though its P6 TF=0 is legitimate network logic with no
+    # constraint involved. Under the fallback we disclose lag/relationship-type
+    # as an alternative, non-constraint cause of the divergence instead of
+    # asserting a constraint that may not exist. The traced path lays every lag
+    # and offset, so it needs no such caveat.
+    _incoming_lag_or_nonfs = {}
+    if _lpm_basis != 'traced':
+        for p in preds_all:
+            tc = p.get('task_id', '')
+            ptype = _PRED_TYPE_MAP.get(p.get('pred_type', ''), 'FS')
+            lag_hr = _safe_float(p.get('lag_hr_cnt', 0), 0)
+            if lag_hr != 0 or ptype != 'FS':
+                _incoming_lag_or_nonfs[tc] = True
+
+    # Add the longest-path recommendations (one per activity). Only assert
+    # that a constraint exists when the activity actually carries one
+    # (cstr_type/cstr_type2). When it does not, the prose names the other
+    # causes and does NOT instruct removal of a constraint that is absent: a
+    # fabricated cause is directly attackable in a forensic report and could
+    # corrupt a clean schedule.
     for tid in _lpm_confirmed_false_cp:
         t = task_map.get(tid, {})
         tcode = t.get('task_code', tid)
         tname = t.get('task_name', '')
+        _t_constraints = _get_constraints(t)
+        _lag_or_nonfs = _incoming_lag_or_nonfs.get(tid, False)
+
+        if _t_constraints:
+            _labels = ', '.join(
+                CONSTRAINT_LABELS.get(c, c) for c in _t_constraints)
+            finding = (
+                f"Activity '{tcode} - {tname}' shows zero float but is not "
+                f"confirmed on the true driving path (longest path), and "
+                f"carries constraint(s): {_labels}. The constraint is the "
+                f"likely cause of the zero float."
+            )
+            recommendation = (
+                'This activity shows zero total float in P6, but it is not '
+                'confirmed on the project\'s longest path, the true '
+                f'driving chain. It carries constraint(s): {_labels}. The '
+                'constraint is the likely cause of the artificially zero '
+                'float rather than true network logic. Verify the constraint '
+                'against contract requirements and remove it if it is not '
+                'contractually required.'
+            )
+        elif _lag_or_nonfs:
+            finding = (
+                f"Activity '{tcode} - {tname}' shows zero float but is not "
+                f"confirmed on the true driving path. It is reached through "
+                f"a lag or overlap link that the cross-check cannot trace, "
+                f"so this is likely an artifact of the test rather than a "
+                f"schedule problem."
+            )
+            recommendation = (
+                'This activity shows zero total float in P6, but it is not '
+                'confirmed on the project\'s longest duration path, the true '
+                'driving chain. It carries no constraint (cstr_type and '
+                'cstr_type2 are empty). The cross-check rebuilds the longest '
+                'path with lags set to zero, so a lag or '
+                'overlap offset on an incoming relationship can shorten the '
+                'path through this activity and drop it from the traced chain '
+                'even though its zero float is legitimate logic. Confirm the '
+                'cause before acting: verify the incoming lag/relationship '
+                'type, then check for retained-logic or out-of-sequence '
+                'progress. Do NOT remove a constraint here: there is none.'
+            )
+        elif _lpm_basis == 'traced':
+            finding = (
+                f"Activity '{tcode} - {tname}' shows zero float but is not on "
+                f"the longest path (the driving relationships traced back from "
+                f"the project's latest early finish, as P6 finds it). No date "
+                f"constraint is present on it; its zero float comes from "
+                f"elsewhere in its chain, such as a constraint, a Must Finish "
+                f"By or an open end, or from out-of-sequence progress."
+            )
+            recommendation = (
+                'This activity shows zero total float in P6, but no driving '
+                'relationship carries it to the project finish. It carries no '
+                'constraint (cstr_type and cstr_type2 are empty). Find what '
+                'sets its float before acting: a constraint or Must Finish By '
+                'on a successor, an open end, or out-of-sequence progress. Do '
+                'NOT remove a constraint here: there is none on it.'
+            )
+        else:
+            finding = (
+                f"Activity '{tcode} - {tname}' shows zero float but is not "
+                f"confirmed on the true driving path. No date constraint is "
+                f"present; the likely cause is stale statusing, out-of-"
+                f"sequence progress, or a calendar or lag effect."
+            )
+            recommendation = (
+                'This activity shows zero total float in P6, but it is not '
+                'confirmed on the project\'s longest duration path, the true '
+                'driving chain. It carries no constraint (cstr_type and '
+                'cstr_type2 are empty). Investigate '
+                'the cause (retained logic, out-of-sequence progress, or a '
+                'calendar or lag effect) before acting. Do NOT remove a '
+                'constraint here: there is none to remove.'
+            )
+
         results['recommendations'].append({
             'priority': 'Critical',
             'category': 'Constraint-Driven CP',
-            'finding': (
-                f"Activity '{tcode} - {tname}' is on TFM (TF=0) but NOT on "
-                f"LPM (longest path). LPM-confirmed constraint-driven false-CP "
-                f"candidate per AACE 49R-06."
-            ),
-            'recommendation': (
-                'This activity has zero total float per P6 scheduling (TFM), '
-                'but it is NOT on the project\'s longest duration path (LPM). '
-                'The discrepancy is math-grounded evidence that a constraint — '
-                'hard date, mandatory, retained logic, or out-of-sequence '
-                'progress — is artificially forcing zero float rather than '
-                'true network logic. Investigate and remove the constraint if '
-                'it is not contractually required.'
-            ),
+            'finding': finding,
+            'recommendation': recommendation,
             'affected_activity': tcode,
         })
+
+    # ── Reconcile rating/score/note with the longest-path result ─────────────
+    # The rating/score/note above are computed purely from cp_constrained_pct
+    # (hard-constraint count) BEFORE the longest path is read. If zero-float
+    # activities sit off it, the Critical recommendation(s) they spawned would
+    # contradict a GREEN/100/"logic-driven" headline, so the rating, score and
+    # note say so: a clean constraint headline never sits over them.
+    if _lpm_confirmed_false_cp:
+        _n_false = len(_lpm_confirmed_false_cp)
+        _noun = 'activity' if _n_false == 1 else 'activities'
+        _verb = 'diverges' if _n_false == 1 else 'diverge'
+        # Cap at AMBER and pull the score below 100 so the weighted
+        # overall_score is not inflated by a contradicted check.
+        if cstr_rating == RATING_GREEN:
+            cstr_rating = RATING_AMBER
+        cstr_score = min(cstr_score, 70)
+        # Only name a constraint as a possible cause when at least one of the
+        # diverging activities actually carries one.
+        _any_constrained = any(
+            _get_constraints(task_map.get(tid, {}))
+            for tid in _lpm_confirmed_false_cp
+        )
+        if _lpm_basis == 'traced':
+            _cause_clause = (
+                'a constraint, a Must Finish By or an open end in their chain, '
+                'or out-of-sequence progress'
+                + ('' if _any_constrained else
+                   ' (no constraint is present on these activities)')
+            )
+        else:
+            _cause_clause = (
+                'a constraint, a stripped lag/SS-FF-SF offset, retained logic, '
+                'or out-of-sequence progress'
+                if _any_constrained else
+                'a stripped lag/SS-FF-SF offset, retained logic, or '
+                'out-of-sequence progress (no constraint is present on these '
+                'activities)'
+            )
+        cstr_note = cstr_note + (
+            f' However, {_n_false} zero-float {_noun} {_verb} from the true '
+            f'driving chain (the longest path'
+            + ('' if _lpm_basis == 'traced' else ', LPM, duration-only')
+            + f'): flagged for review, possibly driven by {_cause_clause}. '
+            f'See the Constraint-Driven CP recommendation(s).'
+        )
 
     results['checks']['constraint_driven'] = {
         'name': 'Constraint-Driven Criticality',
@@ -899,6 +1125,11 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         'constraint_breakdown': cstr_breakdown,
         'lpm_confirmed_false_cp': _lpm_confirmed_false_cp,
         'lpm_error': _lpm_error,
+        # 'traced': the driving path traced on the stored dates (P6's Longest
+        # Path); 'duration-only': compute_lpm, when the trace could not read
+        # the file (lpm_trace_reason says why).
+        'lpm_basis': _lpm_basis,
+        'lpm_trace_reason': _lpm_trace_reason,
     }
 
     # ── CHECK 3: Open Ends ─────────────────────────────────────────
@@ -1818,12 +2049,22 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             _hrs = _safe_float(_t.get('total_float_hr_cnt', 0), 999)
             _node['tf'] = _hrs_to_days(_hrs, cal_map, _cid)
 
-        _dcn = build_driver_chain_narrative(
-            _cpm_result,
-            target_codes=_target_codes,
-            jurisdiction=jurisdiction,
-            max_depth=10,
-        )
+        # The narrative's false-CP label follows Check 2's longest path: the
+        # traced path when the stored dates could be traced (28-Oct-2026). Its
+        # network is keyed by task_id, so the path goes in as task_ids. A
+        # narrative module older than that takes no such argument and
+        # computes its own, duration-only.
+        _dcn_kwargs = dict(target_codes=_target_codes, jurisdiction=jurisdiction,
+                           max_depth=10)
+        if _lp_codes is not None:
+            _dcn_kwargs['longest_path_codes'] = {
+                t['task_id'] for t in work_tasks
+                if ((t.get('task_code') or '').strip() or t['task_id']) in _lp_codes}
+        try:
+            _dcn = build_driver_chain_narrative(_cpm_result, **_dcn_kwargs)
+        except TypeError:
+            _dcn_kwargs.pop('longest_path_codes', None)
+            _dcn = build_driver_chain_narrative(_cpm_result, **_dcn_kwargs)
 
         # Enrich each narrative with the user-facing task_code + task_name so
         # the dashboard doesn't need a second lookup against task_map.
