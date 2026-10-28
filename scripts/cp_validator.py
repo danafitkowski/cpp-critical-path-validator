@@ -27,6 +27,7 @@ for _path in (_XER_PARSER_SCRIPTS, _CPP_COMMON_SCRIPTS, _SCRIPT_DIR):
 from xer_parser import (  # noqa: E402
     get_table,
     get_calendar_map,
+    calendar_corrupt_fallbacks,
     resolve_task_calendars,
     with_resolved_calendars,
     build_wbs_map,
@@ -336,14 +337,31 @@ def _resolve_lag_cal_role(token):
     return t if t in ('predecessor', 'successor') else 'successor'
 
 
+# Values of SCHEDOPTIONS.sched_calendar_on_relationship_lag as P6 exports
+# them without the rcal_ prefix, and the rcal_ token each is read as. P6
+# Professional 23.12.1 imported a synthetic update holding 'Successor' and
+# wrote 'Successor' back unchanged in its F9 exports (3-Oct-2026). Read raw,
+# it is no token the engine knows, and the engine falls back to the
+# successor's calendar under an ALERT; read as rcal_Successor it walks the
+# same calendar with no ALERT.
+_LAG_CAL_AS_EXPORTED = {
+    'Successor': 'rcal_Successor',
+}
+
+
 def _detect_schedule_options(data, pid):
     """The relationship-lag calendar of project `pid`, from its SCHEDOPTIONS
     row (else the table's first row), read as CPP's internal validator reads
     it.
 
-    P6's default, taken when the table is absent (some export profiles omit
-    it) or the field is blank, is the predecessor's calendar
-    (rcal_Predecessor). Returns ``relationship_lag_calendar`` (the token),
+    P6 defaults, measured on P6 23.12.1's own F9 on 11-Oct-2026: with no
+    SCHEDOPTIONS table (some export profiles omit it) the predecessor's
+    calendar (rcal_Predecessor), P6's project default; with the field blank
+    the SUCCESSOR's calendar (rcal_Successor), as P6's help says for "no
+    calendar selected". A value P6 exports without the rcal_ prefix
+    (``Successor``, see _LAG_CAL_AS_EXPORTED) is read as its rcal_ token;
+    the source keeps the value as the file stores it. Returns
+    ``relationship_lag_calendar`` (the token),
     ``relationship_lag_calendar_source`` (how it was determined) and
     ``lag_calendar_role`` ('predecessor' or 'successor': the calendar Check 5
     converts lag hours to days on), and the two settings Check 2's driving-
@@ -369,7 +387,8 @@ def _detect_schedule_options(data, pid):
         lag_token = 'rcal_Predecessor'
         lag_source = (
             'SCHEDOPTIONS table absent from export; P6 default '
-            '(predecessor calendar, rcal_Predecessor) assumed')
+            '(predecessor calendar, rcal_Predecessor), as P6 23.12.1 '
+            'schedules such a file (measured 11-Oct-2026)')
         mode = 'retained_logic'
         mode_source = ('SCHEDOPTIONS table absent from export; P6 default '
                        '(retained logic) assumed')
@@ -379,14 +398,19 @@ def _detect_schedule_options(data, pid):
     else:
         lag_raw = (row.get('sched_calendar_on_relationship_lag') or '').strip()
         if lag_raw:
-            lag_token = lag_raw
+            lag_token = _LAG_CAL_AS_EXPORTED.get(lag_raw, lag_raw)
             lag_source = ('SCHEDOPTIONS sched_calendar_on_relationship_lag=%s'
                           % lag_raw)
+            if lag_token != lag_raw:
+                lag_source += ' (as P6 exports it; read as %s)' % lag_token
         else:
-            lag_token = 'rcal_Predecessor'
+            # P6 23.12.1 lays a blank lag calendar on the SUCCESSOR's calendar
+            # (measured 11-Oct-2026); a missing table is the predecessor default.
+            lag_token = 'rcal_Successor'
             lag_source = (
                 'SCHEDOPTIONS sched_calendar_on_relationship_lag blank; P6 '
-                'default (predecessor calendar, rcal_Predecessor) assumed')
+                'schedules a blank lag calendar on the successor calendar '
+                '(rcal_Successor), measured 11-Oct-2026')
         retained = (row.get('sched_retained_logic') or '').strip().upper()
         override = (row.get('sched_progress_override') or '').strip().upper()
         if override == 'Y':
@@ -503,8 +527,9 @@ def validate_critical_path(data, project_index=0, profile='commercial',
 
     # The relationship-lag calendar from the selected project's SCHEDOPTIONS
     # row. lag_calendar_role is the calendar Check 5 divides lag hours by, so
-    # a lag reads in the working days of the calendar P6 measures it on (P6's
-    # default: the predecessor's).
+    # a lag reads in the working days of the calendar P6 measures it on (the
+    # predecessor's with no SCHEDOPTIONS table, the successor's when the
+    # field is blank).
     _sched_opts = _detect_schedule_options(data, target_proj_id)
     _lag_role = _sched_opts['lag_calendar_role']
 
@@ -658,6 +683,11 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         # scheduling mode and start-to-start lag setting Check 2's trace ran
         # with, each with how it was determined.
         'schedule_options': _sched_opts,
+        # The calendar-corrupt-p6-fallback ALERT of every corrupt calendar
+        # record (finish-first slots and an illegal clndr_type): the parser
+        # read each as P6's internal Standard, as P6 schedules it, so every
+        # figure on that calendar here ran on the Standard. Always present.
+        'calendar_corrupt_alerts': calendar_corrupt_fallbacks(cal_map or {}),
         # Blank TASK.clndr_id resolution: what resolved onto the project
         # calendar, and what has no usable calendar at all.
         'calendar_resolution': _calendar_resolution(_task_cals, work_tasks),
@@ -1443,7 +1473,7 @@ def validate_critical_path(data, project_index=0, profile='commercial',
             on_cp = tid in cp_task_ids or pid in cp_task_ids
 
             # P6 measures lag on the calendar named by SCHEDOPTIONS.sched_
-            # calendar_on_relationship_lag (rcal_Predecessor by default), so
+            # calendar_on_relationship_lag (see _detect_schedule_options), so
             # the hrs→days conversion uses the detected role's clndr_id. Falls
             # back to the other side's calendar, then to the 8hr default.
             _lag_tid = pid if _lag_role == 'predecessor' else tid

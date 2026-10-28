@@ -27,7 +27,7 @@ import math
 import os
 import re
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from collections import defaultdict, OrderedDict
 
 # ─────────────────────────────────────────────
@@ -104,6 +104,7 @@ __all__ = [
     'get_work_days_between', 'duration_hours_to_days',
     'resolve_task_calendars', 'with_resolved_calendars', 'calendar_resolution_block',
     'calendar_shift_hours', 'CalendarShiftHoursWarning',
+    'calendar_corrupt_fallbacks', 'CalendarCorruptRecordWarning',
     # Cross-reference
     'build_wbs_map', 'build_resource_map',
     'build_predecessor_map', 'build_activity_code_map', 'build_udf_map',
@@ -894,6 +895,309 @@ def calendar_shift_hours(cal_map):
     ]
 
 
+# ─────────────────────────────────────────────
+# CORRUPT CALENDAR RECORDS
+# ─────────────────────────────────────────────
+# The clndr_data decoder below is cpp-cpm-engine's (python_reference/cpm.py,
+# decode_clndr_data and decode_calendar_record, the Python port of
+# cpm-engine.js decodeClndrData), copied unchanged so that this parser,
+# standalone, screens a calendar record exactly as the engine's parseXER
+# does. Keep it in lockstep with the engine.
+#
+# The screen it carries: a record is CORRUPT when (a) its DaysOfWeek block
+# holds at least one finish-first slot pair, (f|HH:MM|s|HH:MM), AND (b) its
+# CALENDAR.clndr_type is not a legal P6 token (CA_Base / CA_Rsrc /
+# CA_Project). The corrupt record seen in real exports carries 'CT_Project'
+# where every legitimate project calendar says 'CA_Project'. P6 cannot bind
+# such a record and schedules the activities assigned to it on its internal
+# Standard calendar: Monday to Friday, eight hours a day, no exceptions.
+# Measured on P6's own stored dates in real exports carrying the record:
+# every one of 130 unambiguous not-started spans on it walks Monday to
+# Friday, no forecast date lands on the Saturday it declares working,
+# statutory holidays are worked, and every finish closes at the default
+# calendar's closing time.
+#
+# Finish-first slots ALONE are a legitimate export variant: finish-first
+# records with a legal clndr_type were shown genuine by P6's own stored dates
+# (their declared week walked, their own holidays kept), and they decode as
+# declared. A record failing only one conjunct decodes as declared. A blank
+# or missing clndr_type fails (b), so finish-first slots with no type take
+# the fallback; a genuine P6 export always writes the type.
+#
+# Three grammar cases the decoder handles beyond the common form: slots
+# serialized finish-first; f|00:00, the midnight END of a shift (1440
+# minutes), not 0; and s|00:00|f|00:00, a full 24-hour working day.
+
+_D7_SLOT_ANY = re.compile(
+    r'(?:s\|(\d{1,2}:\d{2})\|f\|(\d{1,2}:\d{2}))'
+    r'|(?:f\|(\d{1,2}:\d{2})\|s\|(\d{1,2}:\d{2}))')
+_D7_FINISH_FIRST = re.compile(r'f\|\d{1,2}:\d{2}\|s\|\d{1,2}:\d{2}')
+_D7_DAY_SEG = re.compile(r'^\(0\|\|([1-7])\(\)')
+_D7_EXC_DATE = re.compile(r'd\|(\d{3,7}|\d{4}-\d{2}-\d{2})\b')
+_D7_ISO_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _d7_block_after(text, anchor):
+    """Contents of the parenthesised block that follows `anchor`."""
+    i = text.find(anchor)
+    if i < 0:
+        return None
+    j = text.find('(', i + len(anchor))
+    if j < 0:
+        return None
+    if text[j:j + 2] == '()':
+        j = text.find('(', j + 2)
+        if j < 0:
+            return None
+    depth = 0
+    for k in range(j, len(text)):
+        ch = text[k]
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                return text[j + 1:k]
+    return None
+
+
+def _d7_segments_of(block):
+    """Split a block into its top-level (...) segments."""
+    segs = []
+    depth = 0
+    start = -1
+    for k, ch in enumerate(block):
+        if ch == '(':
+            if depth == 0:
+                start = k
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0 and start >= 0:
+                segs.append(block[start:k + 1])
+                start = -1
+    return segs
+
+
+def _d7_hhmm(s):
+    p = s.split(':')
+    return int(p[0]) * 60 + int(p[1])
+
+
+def _d7_slots_of(seg):
+    slots = []
+    for m in _D7_SLOT_ANY.finditer(seg):
+        if m.group(1) is not None:
+            s = _d7_hhmm(m.group(1))
+            f = _d7_hhmm(m.group(2))
+        else:
+            f = _d7_hhmm(m.group(3))
+            s = _d7_hhmm(m.group(4))
+        if f == 0:
+            f = 1440   # midnight END of the shift (with s=0, a full 24h day)
+        if f > s:
+            slots.append((s, f))
+    return slots
+
+
+def _d7_serial_to_date_string(raw_val):
+    v = str(raw_val).strip()
+    if _D7_ISO_DATE.match(v):
+        try:
+            date(int(v[0:4]), int(v[5:7]), int(v[8:10]))
+        except ValueError:
+            return ''
+        return v
+    try:
+        serial = int(v, 10)
+    except ValueError:
+        return ''
+    dt = date(1899, 12, 30) + timedelta(days=serial)
+    if dt.year < 1970 or dt.year > 2099:
+        return ''
+    return dt.strftime('%Y-%m-%d')
+
+
+_D7_LEGAL_CLNDR_TYPES = ('CA_Base', 'CA_Rsrc', 'CA_Project')
+
+
+def decode_clndr_data(clndr_data, clndr_type=None):
+    """Decode a P6 CALENDAR.clndr_data blob: cpp-cpm-engine's decoder,
+    unchanged (see CORRUPT CALENDAR RECORDS above)."""
+    out = {
+        'decode_ok': False,
+        'corrupt_fallback': False,
+        'work_days': [],
+        'holidays': [],
+        'special_workdays': [],
+        'week_hours': [0, 0, 0, 0, 0, 0, 0],   # hours/day, index 0=Sun..6=Sat
+        'hours_per_day': None,
+        'declared': None,
+    }
+    raw = '' if clndr_data is None else str(clndr_data)
+    if not raw or '(' not in raw:
+        return out
+
+    week_minutes = [0, 0, 0, 0, 0, 0, 0]
+    finish_first_in_week = False
+    dow_block = _d7_block_after(raw, 'DaysOfWeek')
+    if dow_block is not None:
+        for seg in _d7_segments_of(dow_block):
+            m = _D7_DAY_SEG.match(seg)
+            if not m:
+                continue
+            js_dow = (int(m.group(1)) - 1) % 7   # P6 1=Sun..7=Sat -> 0=Sun..6=Sat
+            if _D7_FINISH_FIRST.search(seg):
+                finish_first_in_week = True
+            mins = 0
+            for sl in _d7_slots_of(seg):
+                mins += sl[1] - sl[0]
+            week_minutes[js_dow] = mins
+    holidays = []
+    specials = []
+    exc_block = _d7_block_after(raw, 'Exceptions')
+    if exc_block is not None:
+        for seg in _d7_segments_of(exc_block):
+            dm = _D7_EXC_DATE.search(seg)
+            if not dm:
+                continue
+            ds = _d7_serial_to_date_string(dm.group(1))
+            if not ds:
+                continue
+            if len(_d7_slots_of(seg)) > 0:
+                specials.append(ds)
+            else:
+                holidays.append(ds)
+    work_days = [i for i in range(7) if week_minutes[i] > 0]
+    week_hours = [mn / 60 for mn in week_minutes]
+
+    _legal_clndr_type = (
+        str('' if clndr_type is None else clndr_type).strip()
+        in _D7_LEGAL_CLNDR_TYPES)
+    if finish_first_in_week and not _legal_clndr_type:
+        # The corrupt record: P6's internal Standard, Mon-Fri, 8 h/day, NO
+        # exceptions. A corrupt record declaring other hours still falls
+        # back to 8 (inferred for that case: the measured records declare 8).
+        out['corrupt_fallback'] = True
+        out['decode_ok'] = False
+        out['work_days'] = [1, 2, 3, 4, 5]
+        out['week_hours'] = [0, 8, 8, 8, 8, 8, 0]
+        out['hours_per_day'] = 8
+        out['declared'] = {
+            'work_days': work_days,
+            'week_hours': week_hours,
+            'holidays': holidays,
+            'special_workdays': specials,
+        }
+        return out
+    out['work_days'] = work_days
+    out['week_hours'] = week_hours
+    out['holidays'] = holidays
+    out['special_workdays'] = specials
+    out['decode_ok'] = len(work_days) > 0
+    if work_days:
+        out['hours_per_day'] = max(week_hours[d] for d in work_days)
+    return out
+
+
+def decode_calendar_record(clndr_id, clndr_name, clndr_data, alerts=None,
+                           clndr_type=None):
+    """Decode one CALENDAR row the way cpp-cpm-engine's parseXER does
+    (the engine's function, unchanged).
+
+    Returns {work_days, holidays, special_workdays, hours_per_day,
+    p6_fallback?}, or None when clndr_data is empty or does not decode. A
+    corrupt record (see CORRUPT CALENDAR RECORDS above; pass the row's
+    clndr_type) gets the P6 Standard fallback, and the
+    ``calendar-corrupt-p6-fallback`` ALERT is appended to ``alerts``.
+    """
+    if not clndr_data:
+        return None
+    dec = decode_clndr_data(clndr_data, clndr_type)
+    if dec['corrupt_fallback']:
+        cal = {
+            'work_days': list(dec['work_days']),
+            'holidays': [],
+            'special_workdays': [],
+            'hours_per_day': 8,
+            'p6_fallback': True,
+        }
+        if isinstance(alerts, list):
+            decl = dec.get('declared') or {}
+            decl_wd = decl.get('work_days') or []
+            decl_hrs = decl.get('week_hours') or []
+            decl_max = 0
+            for d in decl_wd:
+                if d < len(decl_hrs) and decl_hrs[d] > decl_max:
+                    decl_max = decl_hrs[d]
+            alerts.append({
+                'severity': 'ALERT',
+                'context': 'calendar-corrupt-p6-fallback',
+                'message': 'FORENSIC FINDING: calendar ' + str(clndr_id) +
+                    ' (' + (clndr_name or 'unnamed') + ') carries a ' +
+                    "corrupt CALENDAR record — its clndr_type field holds '" +
+                    ('' if clndr_type is None else str(clndr_type)) +
+                    "', not a legal P6 calendar-type " +
+                    'token (CA_Base / CA_Rsrc / CA_Project), and its weekly ' +
+                    'shift slots are serialized finish-first ' +
+                    '((f|HH:MM|s|HH:MM)). P6 cannot bind such a record and ' +
+                    'demonstrably scheduled the activities assigned to it on ' +
+                    'its internal default Standard calendar (Mon-Fri, 8 h/day, ' +
+                    'NO exceptions), not on the declared pattern (' +
+                    str(len(decl_wd)) + ' working day(s)/week at ' +
+                    ('%g' % decl_max) +
+                    ' h/day). The engine emulates that fallback so its dates ' +
+                    'match what P6 actually computed. The source record ' +
+                    'should be repaired in the P6 database; dates computed ' +
+                    'on the declared pattern would diverge from every P6 ' +
+                    'reschedule of this file.',
+            })
+        return cal
+    if dec['decode_ok']:
+        return {
+            'work_days': list(dec['work_days']),
+            'holidays': list(dec['holidays']),
+            'special_workdays': list(dec['special_workdays']),
+            'hours_per_day': dec['hours_per_day'],
+        }
+    return None
+
+
+class CalendarCorruptRecordWarning(UserWarning):
+    """A CALENDAR row is a corrupt record: its week's shift slots are
+    serialized finish-first ((f|HH:MM|s|HH:MM)) AND its ``clndr_type`` is not
+    a legal P6 token (CA_Base / CA_Rsrc / CA_Project).
+
+    P6 cannot bind such a record and schedules the activities assigned to it
+    on its internal Standard calendar (Monday to Friday, 8 h/day, no
+    exceptions); measured on P6's own stored dates in real exports.
+    ``get_calendar_map`` substitutes exactly that calendar, which is a
+    finding to disclose, not a repair, and carries the
+    ``calendar-corrupt-p6-fallback`` ALERT on the entry; see
+    ``calendar_corrupt_fallbacks(cal_map)``.
+
+    Finish-first slots alone are a legitimate export variant: a record with a
+    legal ``clndr_type`` decodes as declared and never raises this warning.
+    """
+
+
+def calendar_corrupt_fallbacks(cal_map):
+    """Return the ``calendar-corrupt-p6-fallback`` ALERT dicts carried by
+    ``cal_map``: {'severity', 'context', 'message'}.
+
+    One entry per calendar that took the P6 Standard fallback because its
+    record is corrupt (see ``CalendarCorruptRecordWarning``). A report
+    computed on the fallback must disclose it. Empty when no calendar in the
+    file is a corrupt record.
+    """
+    out = []
+    for c in cal_map.values():
+        if isinstance(c, dict) and c.get('p6_fallback') \
+                and c.get('corrupt_record_alert'):
+            out.append(dict(c['corrupt_record_alert']))
+    return out
+
+
 def get_calendar_map(data):
     """
     Build a calendar lookup: clndr_id → parsed calendar info.
@@ -906,6 +1210,15 @@ def get_calendar_map(data):
     hours_per_day is the hours the shifts work, as P6 schedules them; the
     file's figure is kept as declared_hours_per_day, and a
     CalendarShiftHoursWarning names the calendar.
+
+    A corrupt record (finish-first slot pairs in its week AND a clndr_type
+    that is not CA_Base, CA_Rsrc or CA_Project) is P6's internal Standard
+    too, as P6 schedules it: Monday to Friday, hours_per_day 8 whatever
+    day_hr_cnt says, no holidays, ``p6_fallback`` True, with the
+    ``calendar-corrupt-p6-fallback`` ALERT under ``corrupt_record_alert``
+    (``calendar_corrupt_fallbacks(cal_map)`` reads them back) and a
+    CalendarCorruptRecordWarning. Every other record, a finish-first one with
+    a legal clndr_type included, decodes as declared.
     """
     calendars = get_table(data, 'CALENDAR')
     cal_map = {}
@@ -937,6 +1250,58 @@ def get_calendar_map(data):
                 'p6_fallback': True, 'empty_record': True,
                 'declared_hours_per_day': _hpd_decl,
             }
+            continue
+
+        # A CORRUPT record (see CORRUPT CALENDAR RECORDS above): P6 schedules
+        # it on its internal Standard, so it gets that calendar here, with
+        # the ALERT on the entry. Every other record falls through to the
+        # unchanged decode below.
+        clndr_name = cal.get('clndr_name', '')
+        clndr_data = cal.get('clndr_data', '')
+        _alerts = []
+        try:
+            _dec = decode_calendar_record(
+                clndr_id, clndr_name, clndr_data, _alerts,
+                clndr_type=(cal.get('clndr_type') or '').strip())
+        except Exception:  # pragma: no cover — defensive
+            _dec, _alerts = None, []
+        if isinstance(_dec, dict) and _dec.get('p6_fallback'):
+            _day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday',
+                          'Thursday', 'Friday', 'Saturday']
+            cal_map[clndr_id] = {
+                'work_days': list(_dec.get('work_days') or [1, 2, 3, 4, 5]),
+                'work_day_names': [_day_names[d] for d in
+                                   (_dec.get('work_days') or [1, 2, 3, 4, 5])],
+                'holidays': [],
+                'special_workdays': [],
+                'exceptions': [],
+                # Eight hours whatever the row's day_hr_cnt says, as the
+                # engine schedules it, so hours-to-days matches the walk.
+                'hours_per_day': 8.0,
+                'hours_per_week': 40.0,
+                'raw': clndr_data,
+                'clndr_id': clndr_id,
+                'clndr_name': clndr_name,
+                'default_flag': cal.get('default_flag', '') or '',
+                'p6_fallback': True,
+                'corrupt_record_alert': (
+                    dict(_alerts[0]) if _alerts else None),
+            }
+            warnings.warn(
+                'CALENDAR {id} {name!r} carries a corrupt clndr_data '
+                'record (finish-first slot pairs + illegal clndr_type '
+                '{typ!r}). P6 demonstrably schedules such records on its '
+                'internal default Standard calendar; the P6 Standard '
+                'fallback (Mon-Fri, 8 h/day, NO exceptions) is '
+                'substituted here to match, and this is a FORENSIC '
+                'FINDING that must be disclosed on any deliverable '
+                'computed from this map — see '
+                'calendar_corrupt_fallbacks(cal_map).'.format(
+                    id=clndr_id, name=clndr_name,
+                    typ=(cal.get('clndr_type') or '').strip()),
+                CalendarCorruptRecordWarning,
+                stacklevel=2,
+            )
             continue
 
         parsed = parse_calendar_data(cal.get('clndr_data', ''))

@@ -14,9 +14,11 @@ Run with: python tests/test_scoring_rules_and_lag_calendar_2026_09_29.py
   "Moderate Confidence"; the score itself is unchanged, and
   ``overall_rating_capped_by_red`` and ``red_checks`` say it happened.
 - **Check 5 converts a lag on the calendar P6 measures it on.** That is the
-  calendar SCHEDOPTIONS.sched_calendar_on_relationship_lag names, the
-  predecessor's by P6's default. Check 5 always used the successor's, so on
-  a schedule mixing calendars a lag read in the wrong working days.
+  calendar SCHEDOPTIONS.sched_calendar_on_relationship_lag names: the
+  predecessor's when the file has no SCHEDOPTIONS table, the successor's when
+  the field is blank (P6 23.12.1, measured 11-Oct-2026; v0.6.0 and earlier
+  read a blank as the predecessor's). Check 5 always used the successor's, so
+  on a schedule mixing calendars a lag read in the wrong working days.
   ``results['schedule_options']`` says which calendar was used and why.
 
 Every fixture is built in this file: neutral activities on Monday-to-Friday
@@ -239,10 +241,16 @@ def test_the_file_can_name_the_successor_calendar():
         'SCHEDOPTIONS sched_calendar_on_relationship_lag=rcal_Successor')
 
 
-def test_a_blank_setting_is_the_predecessor_default():
+def test_a_blank_setting_is_the_successor_calendar():
+    """P6 23.12.1 lays a blank setting on the successor's calendar
+    (measured 11-Oct-2026): -40 h on S's 8 h day is -5 working days. Until
+    v0.7.0 a blank read as the predecessor's, -4."""
     r = _validate(*_mixed(-40), schedoptions='')
-    assert '(-4.0d)' in _lead_finding(r), _lead_finding(r)
-    assert 'blank' in r['schedule_options']['relationship_lag_calendar_source']
+    assert '(-5.0d)' in _lead_finding(r), _lead_finding(r)
+    so = r['schedule_options']
+    assert so['relationship_lag_calendar'] == 'rcal_Successor'
+    assert so['lag_calendar_role'] == 'successor'
+    assert 'blank' in so['relationship_lag_calendar_source']
 
 
 def test_an_excessive_lag_is_judged_in_the_right_working_days():
