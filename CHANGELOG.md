@@ -4,6 +4,120 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## v0.6.0 — 2026-10-28
+
+Check 2 reads the longest path from the driving path traced on the file's own stored
+dates, as P6 finds its Longest Path, instead of rebuilding it with no lag. The rebuild
+flagged activities P6 has on its Longest Path as critical by float alone wherever the
+path runs through lagged or SS/FF overlap links. From a clone of this repository, with
+`cpp-cpm-engine` on the path, the longest-path cross-check now runs; before, it never did.
+
+**Results a caller may see move.** No function signature changed. With `cpp-cpm-engine`
+on the path, on any file whose unfinished activities carry early dates and calendars,
+Check 2 now lists the zero-float activities that are not on the longest path
+(`checks.constraint_driven.lpm_confirmed_false_cp`), adds one Critical "Constraint-Driven
+CP" recommendation for each, holds its rating no better than AMBER and its score at 70
+or below when there is one, says so in its note, and so moves the CP Confidence Score. Before this
+release, from this repository, the cross-check stopped at the missing `compute_lpm` and
+moved nothing. Where a `compute_lpm` was on the path (CPP's internal tree), the lag-free
+path's findings on lagged chains are gone. `results['schedule_options']` gains four keys.
+
+**Why a minor release.** Before 1.0 this project moves the minor number for a release
+that changes results a caller already reads.
+
+### Fixed
+
+- **Check 2's longest path lays every lag and SS/FF/SF offset.** Check 2 flags a
+  zero-float activity that is not on the longest path. It rebuilt that path with
+  `cpm.compute_lpm`, which lays no lag, so on a schedule whose path runs through
+  start-to-start overlaps with lags it ended on another chain. In the new test's
+  fixture three trades overlap SS 10 / FF 0 after a one-day start, and a 35-day side run
+  reaches the finish with five days of float: with its lags the trade chain is the
+  longest, and stripped of them it is 21 days against the side run's 36. With a
+  `compute_lpm` on the path, v0.5.0 flagged all three trades Critical under a GREEN 100
+  Check 2. Check 2 now reads the path P6 finds by "identifying the activities that have
+  an early finish equal to the latest calculated early finish for the project and
+  tracing all driving relationships for those activities back to the project start
+  date" (P6 Professional 23.12 help, General tab - Schedule Options dialog box): the
+  driving path traced on the file's stored dates, to the minute, by
+  `scripts/driving_path.py`. On the fixture there is no finding. `compute_lpm` still runs
+  when the trace cannot read the file.
+- **The lag rule is no longer attributed to AACE 49R-06.** The comments said "LPM
+  ignores lag per AACE 49R-06", and each finding called itself a false-CP "candidate per
+  AACE 49R-06". This repository holds no copy of 49R-06 to quote; the longest path is
+  described by P6's own help, as above. The narrative block's references to 49R-06's
+  "Longest Path" heading are unchanged.
+- **A finding names a constraint only where the activity carries one.** The one
+  recommendation text called every finding "math-grounded evidence that a constraint
+  ... is artificially forcing zero float" and said to remove the constraint, whether the
+  activity had one or not. The texts are now CPP's internal ones, less the citation: a constrained
+  activity's names its constraint; an unconstrained one's says there is none to remove
+  and names the other causes (a constraint or Must Finish By on a successor, an open end,
+  out-of-sequence progress; under the duration-only fallback, a stripped lag or
+  overlap).
+- **Check 2's rating, score and note follow its findings.** A zero-float activity off
+  the longest path holds Check 2 no better than AMBER and at most 70, and the note says
+  how many.
+  Before, a GREEN 100 "CP is logic-driven" could sit over Critical findings.
+
+### Added
+
+- **`scripts/driving_path.py`**, CPP's internal driving-path tracer (last changed
+  16-Oct-2026), bundled as it is apart from one import: with no `cpm.py` beside it, it
+  imports `cpp-cpm-engine`'s `cpm` from the path. Its code is AST-identical to the
+  internal file's apart from that function and the module docstring, which says so.
+  The minute trace needs only engine functions that `CPM_ENGINE_PIN` (`6cebfdb`, v2.10.1)
+  and v2.10.14 both have; its working-day trace, which the validator does not run,
+  needs one they lack.
+- **`checks.constraint_driven.lpm_basis`** (`traced`, or `duration-only` when the trace
+  could not read the file) and **`lpm_trace_reason`** (why: no engine on the path, no
+  early dates, no calendars or an activity without one, or relationship lags on a
+  24-hour or project lag calendar, which the trace does not walk).
+- **`results['schedule_options']`** gains `schedule_mode` and `ss_lag_from`, each with a
+  `*_source`, decoded from SCHEDOPTIONS as the internal validator decodes them. The
+  trace schedules with them, and with the lag calendar Check 5 already read.
+- **The driver-chain narrative is handed the same path** (`longest_path_codes`, as
+  task_ids) where a `driver_chain_narrative` module takes it; an older one runs as
+  before. This repository still ships no narrative module.
+
+### Measured against the internal validator
+
+On 282 real P6 exports, both validators trace 249 and both fall back on the other 33
+(no early dates). On 242 of the 249 they flag the same activities. The other 7 are
+updates of one project whose calendar record the bundled parser reads differently (the
+second item below).
+
+### Still differs from the internal validator
+
+- A blank relationship-lag calendar field reads as the predecessor's calendar here, in
+  Check 5 and the trace; the internal validator reads it as the successor's, as P6
+  23.12.1 schedules it. Only a file with that field blank, a lag, and different
+  calendars at the two ends of the lagged link can trace differently.
+- The bundled parser (`cpp-xer-parser` v0.4.0) reads a calendar record with
+  finish-first slot pairs and an illegal `CT_Project` type as the week it writes; the
+  internal parser reads it as P6's Standard, Monday to Friday, as P6 schedules it. On
+  such a calendar a Saturday can break a tie the internal trace follows.
+- `lpm_confirmed_false_cp` lists task_ids here; the internal validator lists
+  `{task_id, task_code}`.
+- The internal validator also compares the traced path with P6's own Longest Path flag
+  (`driving_path_cross_check`); this repository does not.
+
+### Testing
+
+- `tests/test_longest_path_lags_2026_10_28.py` has 8 synthetic tests, the first four
+  adapted from the internal ones. Against v0.5.0, 7 fail; the eighth guards an older
+  narrative module and passes on both. Five need the engine and skip without it. CI runs
+  the file under pytest and directly. Of 7 mutants of the port, 6 are killed; the
+  survivor drops the subtraction of work joined to the path by slack, which a minute
+  trace never has.
+- `test_lpm_confirmed_false_cp_in_check2` checks the duration-only fallback's new
+  wording and that it cites no 49R-06. It still skips with the public engine, which has
+  no `compute_lpm`.
+- The suite is 235 tests: 224 pass and 11 skip without the engine; with
+  `cpp-cpm-engine` at `CPM_ENGINE_PIN` or v2.10.14, 234 pass and 1 skips.
+
+---
+
 ## v0.5.0 — 2026-10-13
 
 The bundled parser is `cpp-xer-parser` v0.4.0, which reads the data date and an empty

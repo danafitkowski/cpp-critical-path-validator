@@ -388,10 +388,15 @@ def test_lpm_confirmed_false_cp_in_check2():
       - All activities get total_float_hr_cnt=0 so TFM flags all.
       - LPM will flag B, C, D on the longest path (80h total) but NOT A (0h branch).
 
-    Skip condition: the LPM cross-check needs a `compute_lpm` in the engine's
-    `cpm` module, which the public `cpp-cpm-engine` does not have. The README
-    says so: without it, Check 2 runs its constraint-driven analysis only and
-    `lpm_error` records the failed import.
+    The fixture carries no early dates, so Check 2 cannot trace its driving
+    path (`lpm_basis` 'duration-only') and falls back to the duration-only
+    longest path, as it did before 28-Oct-2026 for every file.
+
+    Skip condition: the duration-only path needs a `compute_lpm` in the
+    engine's `cpm` module, which the public `cpp-cpm-engine` does not have.
+    The README says so: without it, the fallback records the failed import in
+    `lpm_error`. (The traced path, which runs whenever the file has early
+    dates, needs only the public engine: tests/test_longest_path_lags_2026_10_28.py.)
 
     On stand-alone OSS CI, the engine repo IS cloned and `cpm` imports, but
     the OSS `python_reference/cpm.py` is an explicitly-stripped subset (per
@@ -408,10 +413,9 @@ def test_lpm_confirmed_false_cp_in_check2():
         import pytest as _pytest
         _pytest.skip(
             "cpp-cpm-engine's OSS python_reference does not expose "
-            "compute_lpm, so the LPM cross-check does not run from this "
-            "repository, as the README says. The full LPM-confirmation "
-            "contract is exercised inside the CPP internal _deploy tree "
-            "where compute_lpm is bundled."
+            "compute_lpm, so the duration-only fallback does not run from "
+            "this repository, as the README says. It is exercised inside the "
+            "CPP internal tree, where compute_lpm is bundled."
         )
     tasks = [
         # task_id, task_code, task_name, proj_id, wbs_id, clndr_id,
@@ -450,18 +454,20 @@ def test_lpm_confirmed_false_cp_in_check2():
         f'Got: {confirmed}'
     )
 
-    # A recommendation for A must use the LPM-confirmation language.
-    lpm_recs = [
+    assert cstr_check['lpm_basis'] == 'duration-only'
+
+    # A recommendation for A, which carries no constraint, must not invent one.
+    a_recs = [
         r for r in results['recommendations']
-        if 'LPM-confirmed' in r.get('finding', '')
+        if r['category'] == 'Constraint-Driven CP'
+        and r.get('affected_activity') == 'A'
     ]
-    assert lpm_recs, (
-        'Expected at least one recommendation with "LPM-confirmed" in finding'
-    )
-    # The recommendation must reference AACE 49R-06
-    assert any('AACE 49R-06' in r['finding'] for r in lpm_recs), (
-        'LPM-confirmed recommendation must cite AACE 49R-06'
-    )
+    assert a_recs, 'Expected a Constraint-Driven CP recommendation for A'
+    assert 'No date constraint is present' in a_recs[0]['finding']
+    # Since 28-Oct-2026 the finding no longer attributes the longest path to
+    # AACE 49R-06: the longest path is P6's (its help, General tab - Schedule
+    # Options dialog box), and this repository holds no copy of 49R-06.
+    assert '49R-06' not in a_recs[0]['finding']
 
 
 def test_no_hardcoded_status_or_task_type_literals_in_source():

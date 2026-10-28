@@ -10,8 +10,8 @@ Thank you for taking the time to report.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.5.x   | Yes                |
-| < 0.5   | No                 |
+| 0.6.x   | Yes                |
+| < 0.6   | No                 |
 
 The validator ships as `cpp-critical-path-validator` on GitHub. The most recent published version is always the supported reference; back-ports of security fixes to earlier releases are made on a best-effort basis.
 
@@ -48,7 +48,7 @@ We will credit reporters in the release notes unless you ask to remain anonymous
 - **Performance degradation that does not affect correctness.** "It got 12% slower on a 50,000-activity XER" is not a security issue. Open a normal performance bug.
 - **Style / lint issues.** Including pyflakes, black, and "best practice" complaints.
 - **Citations that "could be worded better."** Citation defects are handled through the regular issue template, not the security channel. Wrong, mis-attributed, or fabricated citations *are* release-blocking, but they are not security vulnerabilities.
-- **The LPM cross-check not running.** Check 2's LPM cross-check needs a `compute_lpm` function that neither this repository nor the public `cpp-cpm-engine` provides, so it does not run from a clone of this repository, with the engine or without it. The README documents this; it is not a security issue.
+- **Check 2's duration-only fallback not running.** On a file its longest-path trace cannot read, Check 2 falls back to a `compute_lpm` function that neither this repository nor the public `cpp-cpm-engine` provides, so the fallback does not run from a clone of this repository, with the engine or without it. The README documents this; it is not a security issue.
 - **Theoretical attacks** with no demonstrated reproduction against a current release.
 
 ---
@@ -78,14 +78,14 @@ We do not currently run a paid bug-bounty program. We will credit reporters in t
 In scope:
 
 - `cpp-critical-path-validator` source on GitHub
-- The bundled `scripts/cp_validator.py`, `scripts/dcma14.py`, `scripts/validation.py`, and `scripts/config_profiles.py`
+- The bundled `scripts/cp_validator.py`, `scripts/dcma14.py`, `scripts/driving_path.py`, `scripts/validation.py`, and `scripts/config_profiles.py`
 - The bundled `scripts/xer_parser.py`, where the issue is a divergence from the upstream commit it is pinned to (also report upstream against `cpp-xer-parser`)
 - `criticalpathpartners.ca` website to the extent it advertises validator behavior
 
 Out of scope:
 
 - Third-party clones, forks, or re-distributions
-- The LPM cross-check, which needs a `compute_lpm` function that neither this repository nor the public `cpp-cpm-engine` provides; the README documents that it does not run from this repository
+- Check 2's duration-only fallback, which needs a `compute_lpm` function that neither this repository nor the public `cpp-cpm-engine` provides; the README documents that it does not run from this repository
 - The closed CPP forensic skill suite — these have their own security channel; email `hello@criticalpathpartners.ca` and we will route.
 
 ---

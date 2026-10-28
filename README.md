@@ -3,7 +3,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![tests](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml)
-[![version: 0.5.0](https://img.shields.io/badge/version-0.5.0-blue.svg)](CHANGELOG.md)
+[![version: 0.6.0](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![AACE: 49R--06](https://img.shields.io/badge/AACE-49R--06-orange.svg)](#aace-alignment)
 
 Critical path validation, logic health assessment, and optimization recommendations for Primavera P6 schedules — plus a full DCMA 14-Point Assessment.
@@ -16,11 +16,13 @@ Companion to [`cpp-cpm-engine`](https://github.com/danafitkowski/cpp-cpm-engine)
 
 ## Scope and status
 
-This is v0.5.0, and it is a public subset. Critical Path Partners maintains a larger internal validator; what this repository publishes is the nine-check core, the DCMA 14-Point assessment, the driving-path tracer and the HTML dashboard. It does not carry every check or output the internal version has.
+This is v0.6.0, and it is a public subset. Critical Path Partners maintains a larger internal validator; what this repository publishes is the nine-check core, the DCMA 14-Point assessment, the driving-path tracer and the HTML dashboard. It does not carry every check or output the internal version has.
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
 `scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.4.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.4.0) (commit [`36879dc`](https://github.com/danafitkowski/cpp-xer-parser/commit/36879dc0e16184c50825c5fd325ae8113d58c956)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too, so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+
+`scripts/driving_path.py` is Critical Path Partners' internal longest-path trace, bundled as it is apart from one import line (its header says which), so Check 2 reads the longest path the way the internal validator does. It needs `cpp-cpm-engine` on the path; see [Integration with the CPP forensic suite](#integration-with-the-cpp-forensic-suite).
 
 ---
 
@@ -33,7 +35,7 @@ It runs nine independent checks on a Primavera P6 schedule:
 | # | Check                              | What it catches                                                             |
 |---|------------------------------------|-----------------------------------------------------------------------------|
 | 1 | Critical path identification       | Are CP activities reasonable in count and % of incomplete work?             |
-| 2 | Constraint-driven criticality      | Hard constraints overriding network logic — the #1 source of false CP.      |
+| 2 | Constraint-driven criticality      | Hard constraints overriding network logic — the #1 source of false CP — and zero-float work off the longest path. |
 | 3 | Open ends                          | Missing predecessor / successor on incomplete activities.                   |
 | 4 | Relationship quality               | FF / SS on CP without an FS backbone (fragile CP).                          |
 | 5 | Lag analysis                       | Negative lags (leads) on CP that mask true duration.                        |
@@ -300,11 +302,13 @@ All tests build their XER fixtures synthetically in memory; no real client XER f
 
 CP validation is the first thing Critical Path Partners runs on a new XER, checking whether the CP is real before any forensic delay analysis, time impact analysis, or claims-package work begins. That job is done by the internal validator described under [Scope and status](#scope-and-status); this repository publishes its nine-check core so anyone can run the same checks, without the two outputs described below.
 
-When `cpp-cpm-engine` is on the same `sys.path` (its `python_reference/` folder), Check 3 uses the engine's working-day arithmetic to decide which activities finish with the network: a finish at one working day's close and one at the next working day's opening count as the same instant on the activity's calendar. Without the engine, Check 3 matches finishes by day only. `checks.open_ends_cp.finish_match` says which of the two Check 3 ran (`working-day` or `same-day`). CI runs against the engine commit recorded as `CPM_ENGINE_PIN` in `.github/workflows/test.yml`. Check 3's finish test is the only thing in the validator that uses the public engine.
+When `cpp-cpm-engine` is on the same `sys.path` (its `python_reference/` folder), Check 3 uses the engine's working-day arithmetic to decide which activities finish with the network: a finish at one working day's close and one at the next working day's opening count as the same instant on the activity's calendar. Without the engine, Check 3 matches finishes by day only. `checks.open_ends_cp.finish_match` says which of the two Check 3 ran (`working-day` or `same-day`). CI runs against the engine commit recorded as `CPM_ENGINE_PIN` in `.github/workflows/test.yml`.
+
+Check 2 uses the engine too. It flags a zero-float activity that is not on the schedule's longest path, which P6 finds by "identifying the activities that have an early finish equal to the latest calculated early finish for the project and tracing all driving relationships for those activities back to the project start date" (P6 Professional 23.12 help, General tab - Schedule Options dialog box). `scripts/driving_path.py` traces exactly that on the file's own stored dates, to the minute, with every lag and SS/FF/SF offset laid on its calendar, using the engine's calendar arithmetic. `checks.constraint_driven.lpm_basis` says what Check 2 read: `traced`, or `duration-only` when the trace could not read the file, with `lpm_trace_reason` saying why (no engine on the path, no early dates, no calendars, or relationship lags on a 24-hour or project calendar, which the trace does not walk). The trace takes its scheduling mode and start-to-start lag setting from the file's SCHEDOPTIONS, reported in `results['schedule_options']`.
 
 Two outputs need code that neither this repository nor the public engine provides, so they do not run from a clone of this repository, with the public engine or without it:
 
-- **Check 2's LPM cross-check**, which compares the critical path the schedule reports with an independently computed longest path, needs a `compute_lpm` function in the engine's `cpm` module. The public engine's `python_reference/cpm.py` does not have one; its header says it was stripped. Check 2 still runs its constraint-driven analysis, `checks.constraint_driven.lpm_confirmed_false_cp` stays empty, and `checks.constraint_driven.lpm_error` gives the reason: with the public engine it begins "cannot import name 'compute_lpm' from 'cpm'", and without the engine it reads "No module named 'cpm'".
+- **Check 2's duration-only fallback**, for a file the trace cannot read, needs a `compute_lpm` function in the engine's `cpm` module. The public engine's `python_reference/cpm.py` does not have one; its header says it was stripped. On such a file Check 2 still runs its constraint-driven analysis, `checks.constraint_driven.lpm_confirmed_false_cp` stays empty, and `checks.constraint_driven.lpm_error` gives the reason: with the public engine it begins "cannot import name 'compute_lpm' from 'cpm'", and without the engine it reads "No module named 'cpm'". (`compute_lpm` lays no lag, which is why the trace is read first.)
 - **The driver-chain narrative** needs a `driver_chain_narrative` module, which this repository does not ship. `results['driver_chain_narrative']` is an error block instead (an `error` naming the missing module, with empty `narratives` and `manifest`), and the dashboard's Driver-Chain Narratives section shows that error where the narratives would be.
 
 ---
