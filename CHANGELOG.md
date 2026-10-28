@@ -4,6 +4,83 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## v0.7.0 — 2026-10-28
+
+Two P6 rules the internal validator already applies: a blank relationship-lag calendar
+is the successor's, and a corrupt calendar record is P6's internal Standard (the bundled
+parser is `cpp-xer-parser` v0.5.0). Both were listed under "Still differs from the
+internal validator" in v0.6.0; neither is now.
+
+**Results a caller may see move.** No function signature changed. Two kinds of file
+move, from wrong to right:
+- one whose SCHEDOPTIONS `sched_calendar_on_relationship_lag` is blank, where a lag
+  between activities on different calendars is now walked and converted on the
+  successor's calendar: Check 5's lag in working days, and Check 2's traced longest path
+  where such a link decides it;
+- one with a corrupt calendar record, where every figure on that calendar now runs on
+  Monday to Friday at eight hours a day with no holidays: float, duration and lag in
+  working days, Check 3's finish match, Check 2's trace, the DCMA-14 checks that read
+  them, and the scores, ratings and recommendations built on them.
+
+`results['schedule_options']['relationship_lag_calendar_source']` is reworded for a file
+with no SCHEDOPTIONS table (the reading is unchanged), and `results` gains
+`calendar_corrupt_alerts`.
+
+**Why a minor release.** Before 1.0 this project moves the minor number for a release
+that changes results a caller already reads.
+
+### Changed
+
+- **A blank relationship-lag calendar is the successor's.** P6 Professional 23.12.1 lays
+  a lag on the successor's calendar when `sched_calendar_on_relationship_lag` is blank,
+  as its help says for "no calendar selected", and on the predecessor's when the file has
+  no SCHEDOPTIONS table, its project default (both measured on its own F9,
+  11-Oct-2026). v0.6.0 read a blank as the predecessor's. In
+  `tests/test_scoring_rules_and_lag_calendar_2026_09_29.py`, -40 h from an activity on a
+  10-hour calendar to one on an 8-hour calendar, field blank, now reads -5.0 working days
+  where it read -4.0; that test now pins the new reading.
+- **`Successor`, as P6 exports it, is read as `rcal_Successor`.** P6 23.12.1 writes the
+  value back without the `rcal_` prefix. The source string keeps the value as filed and
+  says how it was read.
+- **The bundled parser files are re-vendored** from `cpp-xer-parser` at its release
+  [`v0.5.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.5.0),
+  commit `86211fc`. A calendar record whose week's shift slots are written finish-first
+  and whose `clndr_type` is not `CA_Base`, `CA_Rsrc` or `CA_Project` (the one seen in
+  real exports says `CT_Project`) is read as P6 schedules it: Monday to Friday, eight
+  hours a day, no holidays. v0.6.0 read it as the week it declares, so on a record
+  declaring Monday to Saturday a Saturday could break a driving tie P6's own dates show.
+  Finish-first slots with a legal type decode as declared, as before.
+
+  `xer_parser.py` changes, so `XER_PIN` and `XER_SHA256` move together.
+  `validation.py` and `config_profiles.py` are byte-identical to v0.5.0's.
+
+### Added
+
+- **`results['calendar_corrupt_alerts']`**: the parser's `calendar-corrupt-p6-fallback`
+  alert for each corrupt calendar record in the file, `{severity, context, message}`, so a
+  report can say its figures on that calendar ran on P6's Standard. Empty when there is
+  none. The internal validator also prints them; this one does not.
+
+### Still differs from the internal validator
+
+- `lpm_confirmed_false_cp` lists task_ids here; the internal validator lists
+  `{task_id, task_code}`.
+- The internal validator also compares the traced path with P6's own Longest Path flag
+  (`driving_path_cross_check`); this repository does not.
+
+### Testing
+
+- `tests/test_blank_lag_calendar_and_corrupt_calendar_2026_10_28.py` has 9 synthetic
+  tests. Against v0.6.0, 6 fail with the engine on the path (4 without it); 3 pin what
+  must not move. Three trace and skip without the engine. With the new parser under
+  v0.6.0's validator code, the two corrupt-calendar tests that trace and convert pass and
+  the other four fail, so each rule is pinned on its own. CI runs the file under pytest
+  and directly. Of 5 mutants of the lag-calendar port and the alert, 5 are killed.
+- The suite is 244 tests: 230 pass and 14 skip without the engine; with
+  `cpp-cpm-engine` at `CPM_ENGINE_PIN` or v2.10.14, 243 pass and 1 skips.
+
+---
+
 ## v0.6.0 — 2026-10-28
 
 Check 2 reads the longest path from the driving path traced on the file's own stored
