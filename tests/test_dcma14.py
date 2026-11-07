@@ -120,13 +120,17 @@ def _clean_schedule():
                      'pred_type': 'PR_FS', 'lag_hr_cnt': '0'},
                 ],
             },
+            # 2026-11-07 (the written DCMA definition): the assignments carry
+            # hours. #10 counts an activity as resourced only when an
+            # assignment carries hours or cost (target_qty, remain_qty,
+            # target_cost or remain_cost above 0).
             'TASKRSRC': {
-                'fields': ['task_id', 'rsrc_id'],
+                'fields': ['task_id', 'rsrc_id', 'target_qty', 'remain_qty'],
                 'records': [
-                    {'task_id': 'T0', 'rsrc_id': 'R1'},
-                    {'task_id': 'T1', 'rsrc_id': 'R1'},
-                    {'task_id': 'T2', 'rsrc_id': 'R1'},
-                    {'task_id': 'T3', 'rsrc_id': 'R1'},
+                    {'task_id': 'T0', 'rsrc_id': 'R1', 'target_qty': '0', 'remain_qty': '0'},
+                    {'task_id': 'T1', 'rsrc_id': 'R1', 'target_qty': '40', 'remain_qty': '40'},
+                    {'task_id': 'T2', 'rsrc_id': 'R1', 'target_qty': '40', 'remain_qty': '40'},
+                    {'task_id': 'T3', 'rsrc_id': 'R1', 'target_qty': '0', 'remain_qty': '0'},
                 ],
             },
         },
@@ -160,11 +164,16 @@ def test_dcma_14_clean_schedule_passes_every_assessable_check():
     assert result['dcma_score'] == result['dcma_max'], (
         f'Clean schedule should pass every assessed criterion, got '
         f'{result["dcma_score"]}/{result["dcma_max"]}. Failing: {unhappy}')
-    assert result['dcma_max'] == 12, (
-        f'12 of the 14 are assessable on this fixture (no baseline → no BEI; '
-        f'the Critical Path Test needs a CPM recalculation), '
-        f'got {result["dcma_max"]}')
+    # 2026-11-07 (the written DCMA definition): #11 Missed Tasks needs a
+    # baseline, and without one it is NOT SCORED, so 12 -> 11. #10 Resources
+    # passes only at 100% on every profile; this fixture's two activities
+    # carry hours, so it is scored and passes.
+    assert result['dcma_max'] == 11, (
+        f'11 of the 14 are assessable on this fixture (no baseline → no BEI '
+        f'and no Missed Tasks; the Critical Path Test needs a CPM '
+        f'recalculation), got {result["dcma_max"]}')
     assert sorted(result['dcma_not_assessed']) == [
+        'DCMA-11-MissedTasks',
         'DCMA-12-CriticalPathTest', 'DCMA-14-BEI'], (
         f'not-assessed criteria must be named, got '
         f'{result["dcma_not_assessed"]}')
@@ -187,8 +196,11 @@ def test_dcma_14_catches_negative_float():
     """
     clean = dcma_14_assess(_clean_schedule(), profile='commercial')
     data = _clean_schedule()
-    # Knock T1 into negative float
-    data['tables']['TASK']['records'][0]['total_float_hr_cnt'] = '-40'
+    # Knock T1 into negative float.
+    # 2026-11-07 (the written DCMA definition): records[1] is T1. records[0]
+    # is the start milestone T0, which this test used to edit; #7 counts
+    # incomplete ordinary activities only, not milestones.
+    data['tables']['TASK']['records'][1]['total_float_hr_cnt'] = '-40'
     result = dcma_14_assess(data, profile='commercial')
     check = result['per_check']['DCMA-07-NegFloat']
     assert check['severity'] == 'BLOCK', (
@@ -264,18 +276,28 @@ def test_dcma_14_catches_past_planned_not_complete():
     4.11 is the one that reads the planned/baseline finish. Derivation on this
     fixture, status date 2026-04-24:
 
-      #9   the first activity forecasts 2026-04-27 08:00 for both its early
-           start and early finish, after the status date, and carries no
+      #9   the first ordinary activity (A10) forecasts 2026-04-27 08:00 to
+           2026-05-01 16:00, after the status date, and carries no
            actuals: 0 invalid -> PASS. Only its planned finish was moved.
-      #11  no baseline, so the due date is the current planned finish. One
-           activity is due by the status date (planned finish 2026-01-15) and
+      #11  read against a baseline carrying the same planned finish
+           (2026-01-15): one baseline activity is due by the status date and
            it is still open: 1 of 1 = 100% against the 5% threshold -> WARN.
+           Without a baseline #11 is NOT SCORED (2026-11-07).
     """
+    import copy
     data = _clean_schedule()
     # Move the first activity's planned finish into the past; it stays
     # TK_NotStart with its forecast dates untouched.
-    data['tables']['TASK']['records'][0]['target_end_date'] = '2026-01-15 16:00'
-    result = dcma_14_assess(data, profile='commercial')
+    # 2026-11-07 (the written DCMA definition): the first ORDINARY activity,
+    # A10 (records[1]); records[0] is the start milestone A00, which this test
+    # used to edit, and #11 reads baseline ordinary activities only. #11 no
+    # longer reads the current planned finish: without a baseline it is NOT
+    # SCORED, so the same file is supplied as the baseline.
+    data['tables']['TASK']['records'][1]['target_end_date'] = '2026-01-15 16:00'
+    assert dcma_14_assess(data, profile='commercial')['per_check'][
+        'DCMA-11-MissedTasks']['severity'] == 'INFO'
+    result = dcma_14_assess(data, profile='commercial',
+                            baseline_data=copy.deepcopy(data))
     nine = result['per_check']['DCMA-09-InvalidDates']
     assert nine['severity'] == 'PASS', (
         f'a historical planned finish is not an invalid date, got '
@@ -283,7 +305,7 @@ def test_dcma_14_catches_past_planned_not_complete():
     assert nine['value'] == 0
     eleven = result['per_check']['DCMA-11-MissedTasks']
     assert eleven['severity'] == 'WARN', eleven
-    assert eleven['details']['still_open'] == ['A00'], eleven['details']
+    assert eleven['details']['still_open'] == ['A10'], eleven['details']
     assert abs(eleven['value'] - 100.0) < 1e-9
 
 
