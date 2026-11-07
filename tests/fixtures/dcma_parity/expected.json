@@ -1,0 +1,265 @@
+{
+ "p1_logic": {
+  "current": "p1_logic.xer",
+  "baseline": null,
+  "checks": {
+   "1": {
+    "status": "FAIL",
+    "num": 3,
+    "den": 8
+   },
+   "2": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 9
+   },
+   "3": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 9
+   },
+   "4": {
+    "status": "FAIL",
+    "num": 8,
+    "den": 9
+   },
+   "5": {
+    "status": "PASS",
+    "num": 0,
+    "den": 5
+   },
+   "6": {
+    "status": "PASS",
+    "num": 0,
+    "den": 5
+   },
+   "7": {
+    "status": "PASS",
+    "num": 0,
+    "den": 5
+   },
+   "8": {
+    "status": "PASS",
+    "num": 0,
+    "den": 5
+   },
+   "9": {
+    "status": "PASS",
+    "num": 0,
+    "den": 10
+   },
+   "10": {
+    "status": "NS"
+   },
+   "12": {
+    "status": "NS"
+   },
+   "13": {
+    "status": "NS"
+   }
+  }
+ },
+ "p2_activities": {
+  "current": "p2_activities.xer",
+  "baseline": null,
+  "checks": {
+   "1": {
+    "status": "PASS",
+    "num": 0,
+    "den": 12
+   },
+   "5": {
+    "status": "FAIL",
+    "num": 2,
+    "den": 10
+   },
+   "6": {
+    "status": "FAIL",
+    "num": 2,
+    "den": 9
+   },
+   "7": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 9
+   },
+   "8": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 10
+   },
+   "9": {
+    "status": "PASS",
+    "num": 0,
+    "den": 14
+   },
+   "10": {
+    "status": "FAIL",
+    "num": 2,
+    "den": 9
+   },
+   "12": {
+    "status": "NS"
+   }
+  }
+ },
+ "p3_pair": {
+  "current": "p3_current.xer",
+  "baseline": "p3_baseline.xer",
+  "checks": {
+   "8": {
+    "status": "FAIL",
+    "num": 2,
+    "den": 4
+   },
+   "11": {
+    "status": "FAIL",
+    "num": 3,
+    "den": 8
+   },
+   "13": {
+    "status": "FAIL",
+    "value": 0.867
+   },
+   "14": {
+    "status": "FAIL",
+    "num": 8,
+    "den": 9
+   }
+  }
+ },
+ "p4_cycle": {
+  "current": "p4_cycle.xer",
+  "baseline": null,
+  "checks": {
+   "12": {
+    "status": "FAIL"
+   }
+  }
+ },
+ "p5_mandatory": {
+  "current": "p5_mandatory.xer",
+  "baseline": null,
+  "checks": {
+   "5": {
+    "status": "PASS",
+    "num": 0,
+    "den": 1
+   },
+   "12": {
+    "status": "FAIL"
+   },
+   "13": {
+    "status": "PASS",
+    "value": 1.0
+   }
+  }
+ },
+ "p6_two_projects": {
+  "current": "p6_two_projects.xer",
+  "baseline": null,
+  "checks": {
+   "1": {
+    "status": "PASS",
+    "num": 0,
+    "den": 5
+   },
+   "5": {
+    "status": "PASS",
+    "num": 0,
+    "den": 4
+   },
+   "9": {
+    "status": "PASS",
+    "num": 0,
+    "den": 6
+   }
+  }
+ },
+ "p7_as_built": {
+  "current": "p7_as_built.xer",
+  "baseline": null,
+  "checks": {
+   "1": {
+    "status": "NS"
+   },
+   "2": {
+    "status": "NS"
+   },
+   "3": {
+    "status": "NS"
+   },
+   "4": {
+    "status": "NS"
+   },
+   "5": {
+    "status": "NS"
+   },
+   "6": {
+    "status": "NS"
+   },
+   "7": {
+    "status": "NS"
+   },
+   "8": {
+    "status": "NS"
+   },
+   "9": {
+    "status": "PASS",
+    "num": 0,
+    "den": 4
+   }
+  }
+ },
+ "p8_no_links": {
+  "current": "p8_no_links.xer",
+  "baseline": null,
+  "checks": {
+   "1": {
+    "status": "FAIL",
+    "num": 3,
+    "den": 3
+   },
+   "2": {
+    "status": "NS"
+   },
+   "3": {
+    "status": "NS"
+   },
+   "4": {
+    "status": "NS"
+   }
+  }
+ },
+ "p9_data_date": {
+  "current": "p9_data_date.xer",
+  "baseline": null,
+  "checks": {
+   "1": {
+    "status": "PASS",
+    "num": 0,
+    "den": 4
+   },
+   "9": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 5
+   }
+  }
+ },
+ "p10_late_no_baseline": {
+  "current": "p10_late_no_baseline.xer",
+  "baseline": null,
+  "checks": {
+   "7": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 1
+   },
+   "13": {
+    "status": "FAIL",
+    "value": 0.5
+   }
+  }
+ }
+}

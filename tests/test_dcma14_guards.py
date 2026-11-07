@@ -131,8 +131,14 @@ def test_no_low_contrast_slate_text_in_the_scorecard():
 
 
 def test_cpli_uses_working_day_length():
-    assert 'work_day_delta(data_date_dt, latest_ef' in DCMA, (
-        'CPLI CP length must use work_day_delta (working days), not '
+    # 2026-11-07 (the written DCMA definition): the CP length is the working
+    # TIME on the project calendar (working hours / hours per day, read on the
+    # calendar's shift times), measured by _working_days_between; work_day_delta
+    # counted whole calendar days, so a data date at the opening and a finish at
+    # the close of day five read 4, not 5. The guard against wall-clock hours
+    # below is unchanged.
+    assert '_working_days_between(data_date_dt, latest_ef' in DCMA, (
+        'CPLI CP length must be working time on the project calendar, not '
         'wall-clock hours/8.')
     assert '(latest_ef - data_date_dt).total_seconds()' not in DCMA, (
         'CPLI still computes wall-clock hours for CP length')

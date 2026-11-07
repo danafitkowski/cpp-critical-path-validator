@@ -20,7 +20,7 @@ This is v0.7.0, and it is a public subset. Critical Path Partners maintains a la
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
-`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.5.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.5.0) (commit [`86211fc`](https://github.com/danafitkowski/cpp-xer-parser/commit/86211fcb0199ed3de207284055f472480376d022)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too, so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.5.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.5.0) (commit [`86211fc`](https://github.com/danafitkowski/cpp-xer-parser/commit/86211fcb0199ed3de207284055f472480376d022)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too (except that `config_profiles.py` sets DCMA-14 #10 Resources to 100% on every profile, as CPP's written DCMA-14 definition does), so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 `scripts/driving_path.py` is Critical Path Partners' internal longest-path trace, bundled as it is apart from one import line (its header says which), so Check 2 reads the longest path the way the internal validator does. It needs `cpp-cpm-engine` on the path; see [Integration with the CPP forensic suite](#integration-with-the-cpp-forensic-suite).
 
@@ -122,8 +122,15 @@ print(f"CPLI: {report['cpli']}")
 print(f"BEI:  {report['bei']}")
 
 for check_id, check in report['per_check'].items():
-    print(f"  {check_id}: {check['severity']} — {check['message']}")
+    c = check['counts']   # PASS, FAIL or NOT SCORED, with the counts behind it
+    print(f"  {check_id}: {c['status']} {c['num']}/{c['den']} — {check['message']}")
 ```
+
+Every check is measured as CPP's written DCMA-14 definition states it
+(<https://criticalpathpartners.ca/dcma-14-definition.html>; a copy, with the parity
+fixtures every CPP tool is tested against, is in `tests/fixtures/dcma_parity/`). Each
+result is PASS, FAIL or NOT SCORED, in `check['counts']` with its numerator and
+denominator; `check['severity']` keeps the PASS / WARN / BLOCK / INFO it always had.
 
 The check ids follow the numbering of DCMA-EA PAM 200.1, ending `DCMA-11-MissedTasks`,
 `DCMA-12-CriticalPathTest`, `DCMA-13-CPLI` and `DCMA-14-BEI`. The score is out of the

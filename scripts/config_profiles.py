@@ -47,7 +47,7 @@ _COMMERCIAL: Dict[str, object] = {
     'dcma_high_duration_max_days':      44,    # #8  High Duration threshold
     'dcma_high_duration_max_pct':       5.0,
     'dcma_invalid_dates_max_count':     0,     # #9  Invalid Dates / Future Actuals
-    'dcma_resources_min_pct':           80.0,  # #10 Resources
+    'dcma_resources_min_pct':           100.0, # #10 Resources: every activity of 1+ working day resourced, on every profile (the written DCMA definition)
     'dcma_missed_tasks_max_pct':        5.0,   # #11 Missed Tasks
     'dcma_cpli_min':                    0.95,  # #13 CPLI
     'bei_min':                          0.95,  # #14 BEI
@@ -66,7 +66,7 @@ _NUCLEAR: Dict[str, object] = {
     'dcma_high_duration_max_days':      30,
     'dcma_high_duration_max_pct':       3.0,
     'dcma_invalid_dates_max_count':     0,
-    'dcma_resources_min_pct':           90.0,
+    'dcma_resources_min_pct':           100.0,
     'dcma_missed_tasks_max_pct':        3.0,
     'dcma_cpli_min':                    0.98,
     'bei_min':                          0.98,
@@ -85,7 +85,7 @@ _MINING: Dict[str, object] = {
     'dcma_high_duration_max_days':      60,
     'dcma_high_duration_max_pct':       8.0,
     'dcma_invalid_dates_max_count':     0,
-    'dcma_resources_min_pct':           70.0,
+    'dcma_resources_min_pct':           100.0,
     'dcma_missed_tasks_max_pct':        8.0,
     'dcma_cpli_min':                    0.90,
     'bei_min':                          0.90,

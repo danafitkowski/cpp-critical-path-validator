@@ -350,8 +350,16 @@ def test_adding_an_unrelated_project_changes_no_metric_of_the_selected_one():
     assert alone['bei'] == 0.5
     assert mixed['bei'] == 0.5, mixed['per_check']['DCMA-14-BEI']['message']
     # the one thing that may differ is how the baseline project was found
+    # 2026-11-07 (the written DCMA definition): and the disclosure of how
+    # many projects the file holds and which one was scored
+    # (projects_in_file, project_selection), which names the selection by
+    # design.
+    assert (alone['projects_in_file'], mixed['projects_in_file']) == (1, 2)
+    assert mixed['project_selection'].startswith('P (proj_id P), one of 2 projects')
     for block in (alone, mixed):
         block.pop('baseline_project_match')
+        block.pop('projects_in_file')
+        block.pop('project_selection')
     assert mixed == alone
 
 

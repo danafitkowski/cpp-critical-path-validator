@@ -19,6 +19,13 @@ with the data date on Monday 2026-10-05 and FIN on the following Monday,
 2026-10-12. On a seven-day week the critical path is 7 working days long and
 CPLI = (7 - 1) / 7. The old parser gave 5 days and (5 - 1) / 5. The same
 schedule written start-first is the control: both orders must read alike.
+
+RE-PINNED 2026-11-07 (the written DCMA definition), 7 -> 8. #13 now measures
+the critical path as working TIME on the calendar's shift times, not as whole
+calendar days: the data date sits at Monday's 06:00 opening and FIN at the
+following Monday's 18:00 close, so both Mondays are worked in full and the
+length is 8 working days, CPLI = (8 - 1) / 8 (with the Wednesday holiday, 7).
+Read as Monday to Friday it would be 6.
 Every calendar string is built in this file; no real export is copied.
 """
 import os
@@ -136,9 +143,10 @@ def test_the_finish_first_calendar_decodes_to_a_seven_day_week():
 
 def test_cpli_counts_seven_working_days_a_week():
     c = _cpli(FINISH_FIRST)
-    assert c['details']['cp_length_days'] == 7, c['details']   # was 5
+    # 2026-11-07 (the written DCMA definition): working time, 8 (see above).
+    assert c['details']['cp_length_days'] == 8, c['details']   # was 5, then 7
     assert abs(c['details']['tf_days'] - (-1.0)) < 1e-9, c['details']
-    assert abs(c['value'] - 6 / 7) < 1e-9, c['value']            # was 0.8
+    assert abs(c['value'] - 7 / 8) < 1e-9, c['value']            # was 0.8, then 6/7
 
 
 def test_both_slot_orders_read_alike():
@@ -153,7 +161,8 @@ def test_a_holiday_inside_the_window_is_a_day_off():
     """An empty-body exception is a holiday: Wednesday comes off the seven."""
     data = _parse(_build_xer(_FINISH_FIRST, holiday=_WED_2026_10_07))
     assert '2026-10-07' in get_calendar_map(data)['SEVEN']['holidays']
-    assert _cpli(data)['details']['cp_length_days'] == 6
+    # 2026-11-07 (the written DCMA definition): working time, 8 - 1 = 7.
+    assert _cpli(data)['details']['cp_length_days'] == 7
 
 
 if __name__ == '__main__':

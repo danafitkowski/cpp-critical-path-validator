@@ -214,7 +214,10 @@ def test_missed_tasks_counts_activities_that_finished_late():
             t['act_start_date'] = '2026-04-01 08:00'
             t['act_end_date'] = '2026-04-09 16:00'    # on time
             t['remain_drtn_hr_cnt'] = '0'
-    result = dcma_14_assess(_schedule(tasks, preds), profile='commercial')
+    # 2026-11-07 (the written DCMA definition): #11 needs a baseline; the same
+    # planned finishes serve as one.
+    result = dcma_14_assess(_schedule(tasks, preds), profile='commercial',
+                            baseline_data=_schedule(tasks, preds))
     check = result['per_check']['DCMA-11-MissedTasks']
     det = check['details']
     assert det['due_by_dd'] == 2, det
@@ -255,9 +258,11 @@ def test_missed_tasks_uses_the_baseline_finish_when_a_baseline_is_supplied():
     assert det['still_open_count'] == 1, det
 
     without_bl = dcma_14_assess(current, profile='commercial')
-    assert without_bl['per_check']['DCMA-11-MissedTasks']['details']['due_by_dd'] == 0, (
-        'without a baseline the dragged current Planned Finish hides it — which '
-        'is exactly why the baseline must be used when it is available')
+    # 2026-11-07 (the written DCMA definition): without a baseline the dragged
+    # Planned Finish is not read at all; #11 is NOT SCORED.
+    assert without_bl['per_check']['DCMA-11-MissedTasks']['severity'] == 'INFO', (
+        'without a baseline the dragged current Planned Finish would hide it — '
+        'which is exactly why #11 is not scored without a baseline')
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -303,7 +308,9 @@ def test_critical_path_test_never_claims_a_pass_without_recalculation():
     check = result['per_check']['DCMA-12-CriticalPathTest']
     assert check['severity'] == 'INFO', check
     assert 'DCMA-12-CriticalPathTest' in result['dcma_not_assessed']
-    assert 'NOT ASSESSED' in check['message']
+    # 2026-11-07 (the written DCMA definition): the message says NOT SCORED,
+    # the definition's word (it said NOT ASSESSED).
+    assert 'NOT SCORED' in check['message']
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -366,7 +373,10 @@ def test_blank_total_float_is_reported_not_assessed():
     assert thirteen['severity'] == 'INFO'
     for cid in ('DCMA-06-HighFloat', 'DCMA-07-NegFloat', 'DCMA-13-CPLI'):
         assert cid in result['dcma_not_assessed']
-    assert six['details']['unknown_float_count'] == 4
+    # 2026-11-07 (the written DCMA definition): #6/#7 count incomplete
+    # ORDINARY activities, so the two milestones of _chain() are out of the
+    # population: 4 -> 2.
+    assert six['details']['unknown_float_count'] == 2
     assert result['dcma_score'] <= result['dcma_max']
 
 
@@ -403,15 +413,18 @@ def test_critical_set_honours_project_critical_drtn_hr_cnt():
 # this module.
 # ─────────────────────────────────────────────────────────────────────
 
-def test_lock_high_duration_uses_remaining_duration():
-    """#8 measures REMAINING duration, not original.
+def test_lock_high_duration_uses_original_duration():
+    """#8 measures the ORIGINAL duration (target_drtn_hr_cnt), not the
+    remaining one.
 
-    An implementation that filters on target_drtn_hr_cnt (P6 Original
-    Duration) gets this wrong; dcma14.py reads remain_drtn_hr_cnt, which is the
-    standard reading — #8 exists because remaining work longer than two months
-    cannot be statused. The difference can flip the verdict: a procurement
-    activity with an original duration of 45 working days and 6 remaining is
-    not a high-duration activity.
+    LOCK REVERSED 2026-11-07 (the written DCMA definition). This test pinned
+    the remaining duration (remain_drtn_hr_cnt) and asserted that an activity
+    50 working days long with 6 left was not a high-duration activity. The
+    definition reads the original duration: the baseline's original duration
+    of the same activity when a baseline is supplied and the activity is in
+    it, else the current target_drtn_hr_cnt. The difference can flip the
+    verdict on a real update: a procurement activity 45 working days long
+    with 6 remaining now counts.
     """
     tasks, preds = _chain()
     for t in tasks:
@@ -422,10 +435,12 @@ def test_lock_high_duration_uses_remaining_duration():
             t['remain_drtn_hr_cnt'] = '48'    # 6 working days left
     result = dcma_14_assess(_schedule(tasks, preds), profile='commercial')
     check = result['per_check']['DCMA-08-HighDuration']
-    assert check['details']['high_duration_count'] == 0, (
-        'an activity with 6 remaining working days is not a high-duration '
-        'activity, whatever its original duration was')
-    assert check['severity'] == 'PASS'
+    assert check['details']['high_duration_count'] == 1, (
+        'an activity 50 working days long is a high-duration activity, however '
+        'much of it remains')
+    assert check['details']['current_basis_count'] == 2
+    assert check['counts'] == {'status': 'FAIL', 'num': 1, 'den': 2, 'value': 50.0}
+    assert check['severity'] == 'WARN'
 
 
 def test_lock_invalid_dates_target_is_zero():

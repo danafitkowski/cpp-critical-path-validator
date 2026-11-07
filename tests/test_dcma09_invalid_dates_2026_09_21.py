@@ -114,11 +114,14 @@ def test_an_updated_late_activity_is_valid_and_its_planned_finish_is_check_11():
     and check 11 must be the one that reports it. The old check 9 blocked the
     schedule for it.
     """
-    result = dcma_14_assess(_schedule([
+    data = _schedule([
         _task('A', early=('2026-01-12 08:00', '2026-01-12 17:00'),
               planned=('2026-01-05 08:00', '2026-01-05 17:00')),
         _task('Z'),
-    ]), profile='commercial')
+    ])
+    # 2026-11-07 (the written DCMA definition): #11 reads a baseline, not the
+    # current planned finish; the same file serves as one.
+    result = dcma_14_assess(data, profile='commercial', baseline_data=data)
     nine = result['per_check']['DCMA-09-InvalidDates']
     assert nine['severity'] == 'PASS', nine
     assert nine['value'] == 0
@@ -143,7 +146,10 @@ def test_one_activity_with_two_future_actuals_counts_once():
     ])
     assert nine['severity'] == 'BLOCK'
     assert nine['value'] == 1, nine['message']
-    assert nine['message'].startswith('1 activities with invalid dates'), nine['message']
+    # 2026-11-07 (the written DCMA definition): the message gives the
+    # population behind the count (every result carries its numerator and
+    # denominator).
+    assert nine['message'].startswith('1 of 2 activities with invalid dates'), nine['message']
     det = nine['details']
     assert det['invalid_count'] == 1
     assert det['issue_count'] == 2
@@ -256,8 +262,11 @@ def test_the_message_says_what_was_counted():
               actual=('2026-01-13 08:00', '2026-01-14 17:00')),
     ])
     msg = nine['message']
-    assert msg.startswith('2 activities with invalid dates (threshold ≤ 0)'), msg
-    assert '1 with a forecast (early) start or finish before the status date' in msg, msg
-    assert '1 with an actual start or finish after it' in msg, msg
+    # 2026-11-07 (the written DCMA definition): the message gives the
+    # population behind the count, and says the dates are compared by
+    # calendar day.
+    assert msg.startswith('2 of 2 activities with invalid dates (threshold ≤ 0)'), msg
+    assert '1 with a forecast (early) start or finish on a day before the status date' in msg, msg
+    assert '1 with an actual start or finish on a day after it' in msg, msg
     assert 'past-planned' not in msg, msg
     assert '#11 Missed Tasks' in msg, msg

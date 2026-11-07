@@ -382,7 +382,7 @@ def test_logic_takes_the_network_finish_from_the_remaining_work():
 
 
 def test_logic_details_carry_every_key_when_no_work_is_incomplete():
-    """A schedule with no incomplete work passes with the same details as any
+    """A schedule with no incomplete work carries the same details as any
     other: every count and rate at zero and both lists empty.
 
     DEFECT (2026-09-29): the vacuous pass returned the counts only, so a caller
@@ -400,7 +400,10 @@ def test_logic_details_carry_every_key_when_no_work_is_incomplete():
     check = dcma_14_assess(_schedule(tasks, preds, data_date='2026-05-12 00:00'),
                            profile='commercial')['per_check']['DCMA-01-Logic']
     det = check['details']
-    assert (check['severity'], check['value']) == ('PASS', 0.0), check
+    # 2026-11-07 (the written DCMA definition): an empty population is NOT
+    # SCORED (INFO, no value), never a vacuous PASS; the details keep every key.
+    assert (check['severity'], check['value']) == ('INFO', None), check
+    assert check['counts']['status'] == 'NOT SCORED', check
     assert set(det) == usual, f'missing keys: {sorted(usual - set(det))}'
     assert det['missing_pred'] == det['missing_succ'] == det['examples'] == []
     assert (det['missing_count'], det['denominator']) == (0, 0), det

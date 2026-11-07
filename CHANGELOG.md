@@ -4,6 +4,85 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
+## Unreleased
+
+DCMA-14 is now measured to one written definition: CPP's DCMA-14 definition, version 1
+(<https://criticalpathpartners.ca/dcma-14-definition.html>), the same text every CPP
+tool that reports a DCMA-14 result measures. A copy of it, its constants and the shared
+parity fixtures (synthetic schedules with results worked out by hand from the text) are
+in `tests/fixtures/dcma_parity/`, and `tests/test_dcma_parity.py` checks this validator
+against every one of them.
+
+**Results a caller may see move.** No function signature changed and no key was removed.
+Most schedules move on several checks, from the old reading to the definition's.
+
+### Changed
+
+Every result is now PASS, FAIL or NOT SCORED, with the counts behind it. A check whose
+population is empty, or whose inputs are missing, is NOT SCORED with the reason, never a
+pass, and stays out of both numbers of the score. Percentage thresholds are tested on the
+exact counts, never on a rounded percentage. Per check:
+
+- **#1 Logic.** Only logic relationships count: a link to a level of effort or WBS
+  summary no longer gives an activity a predecessor or successor. A start milestone is
+  excused a missing predecessor only at the network start, and a finish milestone a
+  missing successor only at the network finish.
+- **#2 Leads, #3 Lags, #4 Relationship types.** Measured on live relationships only:
+  both ends in the project, neither end a level of effort or WBS summary, and the
+  successor not yet complete. A lead into finished work is history and no longer fails
+  #2. With no live relationships, all three are not scored. #3 lists any lag over 44
+  working days for information.
+- **#5 Hard constraints.** Counts Start On or Before and Finish On or Before (DCMA's Start
+  No Later Than and Finish No Later Than) as well as Start On, Finish On and the
+  mandatory pair, as the primary or the secondary constraint, on incomplete ordinary
+  activities only. A constrained milestone is listed for information.
+- **#6 High float, #7 Negative float.** Milestones are no longer counted.
+- **#8 High duration.** Reads the original duration (the baseline's, when a baseline is
+  supplied and the activity is in it), not the remaining duration, and says how many
+  activities were read on each basis.
+- **#9 Invalid dates.** Dates are compared by calendar day: an actual later on the data
+  date's own day is valid. Not scored only with no data date, or when no incomplete
+  activity carries an early date to read. A data date filled from the planned start is
+  disclosed.
+- **#10 Resources.** Passes only when every incomplete ordinary activity of at least one
+  working day carries an assignment with hours or cost, on every profile (the bundled
+  profiles' 80%, 90% and 70% floors are now 100%). Not scored when the project has no
+  resource assignments at all.
+- **#11 Missed tasks.** Needs a baseline (not scored without one): baseline ordinary
+  activities due by the data date, matched to the current schedule by Activity ID
+  (trimmed, case ignored). One that is no longer in the current schedule counts as
+  missed. Not scored when fewer than 80% of the due activities match. An ID that appears
+  twice in a file is left out and the number is disclosed.
+- **#12 Critical path test.** Fails on a logic cycle as well as on a completion pinned by
+  a mandatory constraint. A completion with no predecessor is not scored (that is #1's
+  finding); it no longer fails.
+- **#13 CPLI.** The critical path length is the working time on the project calendar's
+  shift times, from the data date to the completion's early finish. The float is the
+  working time to the baseline finish of the same activity, or, with no baseline, the P6
+  float where the file has a deadline or that float is not zero; otherwise not scored.
+- **#14 BEI.** Ordinary activities only in both counts; the numerator counts every
+  activity complete as of the data date, so the index can exceed 1.0.
+- **Projects.** A file with one project is read whole; with several, the latest data
+  date is scored (ties to the most activities, then file order), and the result says
+  which. A baseline file with several projects is matched the same way, and one that
+  shares no Activity ID with the scored project is not used.
+- **Profiles.** A result graded on the nuclear or mining profile names the profile and
+  says its threshold is CPP's, derived from the DCMA check. The commercial profile is
+  DCMA's.
+- **Messages** say NOT SCORED where they said NOT ASSESSED.
+
+### Added
+
+- `per_check[id]['counts']`: `{status: PASS | FAIL | NOT SCORED, num, den, value}`.
+- `projects_in_file`, `project_selection`, `baseline_used`, `data_date_filled` and
+  `definition_version` in the `dcma_14_assess` result.
+- The HTML scorecard shows each check's result with its counts.
+- `tests/fixtures/dcma_parity/` and `tests/test_dcma_parity.py`;
+  `tests/test_dcma_review_2026_11_07.py` and `tests/test_dcma_definition_2026_11_07.py`
+  for the rules the fixtures do not reach.
+
+---
+
 ## v0.7.0 — 2026-10-28
 
 Two P6 rules the internal validator already applies: a blank relationship-lag calendar

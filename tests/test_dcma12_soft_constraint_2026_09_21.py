@@ -111,7 +111,8 @@ def test_a_finish_on_completion_is_not_a_structural_failure():
     result, twelve = _twelve('CS_MEO')
     assert twelve['severity'] == 'INFO', twelve
     assert 'DCMA-12-CriticalPathTest' in result['dcma_not_assessed']
-    assert 'NOT ASSESSED' in twelve['message']
+    # 2026-11-07 (the written DCMA definition): the message says NOT SCORED, the definition's word (it said NOT ASSESSED).
+    assert 'NOT SCORED' in twelve['message']
     assert 'cannot move' not in twelve['message'], twelve['message']
     assert twelve['details']['finish_constraints'] == []
     assert twelve['details']['finish_soft_constraints'] == ['CS_MEO']
@@ -129,18 +130,23 @@ def test_a_start_on_completion_is_not_a_structural_failure_either():
     assert 'Start On' in twelve['message']
 
 
-def test_a_start_on_completion_with_no_predecessor_fails_for_that_reason():
-    """Section 4.12 attributes a failure to missing predecessors or successors
-    where they are needed. A completion activity with no predecessor cannot be
-    reached by any upstream slip, and that rule is untouched. What changes is
-    the stated reason: the old shortcut ran first and said "pinned by CS_MSO",
-    which is not why the test fails.
+def test_a_start_on_completion_with_no_predecessor_is_named_for_that_reason():
+    """A completion activity with no predecessor is named as such, never as
+    "pinned by CS_MSO": the old shortcut ran first and said "pinned by
+    CS_MSO", which is not the finding.
+
+    SEVERITY CHANGED 2026-11-07 (the written DCMA definition), BLOCK -> INFO.
+    The missing predecessor is #1 Logic's finding, and an unlinked finish does
+    not by itself show that a delay inserted on the critical path would not
+    move completion, so #12 is NOT SCORED and carries the fact in its details.
     """
     data = _schedule('CS_MSO')
     data['tables']['TASKPRED']['records'] = []
     twelve = dcma_14_assess(data, profile='commercial')[
         'per_check']['DCMA-12-CriticalPathTest']
-    assert twelve['severity'] == 'BLOCK'
+    # 2026-11-07 (the written DCMA definition): an unlinked finish is #1's
+    # finding; #12 is NOT SCORED, not FAIL.
+    assert twelve['severity'] == 'INFO'
     assert 'has no predecessor' in twelve['message'], twelve['message']
     assert 'pinned by' not in twelve['message']
     assert twelve['details']['no_predecessor'] is True
