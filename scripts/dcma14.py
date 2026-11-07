@@ -290,7 +290,7 @@ DCMA_HARD_CONSTRAINTS = frozenset({
 DCMA_MANDATORY_CONSTRAINTS = frozenset({'CS_MANDSTART', 'CS_MANDFIN'})
 # #13: finish constraints that make a deadline in the file when no baseline is
 # supplied (with PROJECT.plan_end_date, P6 'Must Finish By').
-CPLI_DEADLINE_CONSTRAINTS = frozenset({'CS_MEO', 'CS_MEOB', 'CS_MANDFIN'})
+CPLI_DEADLINE_CONSTRAINTS = frozenset({'CS_MEO', 'CS_MEOB'})
 
 # #11: below this share of due baseline activities matching a current one by
 # Activity ID, the baseline looks renumbered and a figure would be built on the
@@ -1009,7 +1009,7 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
             'examples': [], 'counts': _ns_counts()}
     bl_days = (baseline_basis or {}).get('days') or {}
     ambiguous = (baseline_basis or {}).get('ambiguous') or set()
-    long_ones, on_baseline, on_current, left_out = [], 0, 0, []
+    long_ones, on_baseline, on_current, left_out, blank = [], 0, 0, [], []
     for t in pop:
         key = _norm_code(t.get('task_code', ''))
         if baseline_basis is not None and key and key in ambiguous:
@@ -1017,6 +1017,10 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
         if baseline_basis is not None and key and key not in ambiguous and key in bl_days:
             days, basis = bl_days[key], 'baseline'
             on_baseline += 1
+        elif not str(t.get('target_drtn_hr_cnt', '') or '').strip():
+            # A blank duration is not zero: it is left out and counted.
+            blank.append(_code(t))
+            continue
         else:
             days = _hrs_to_days(_safe_float(t.get('target_drtn_hr_cnt', ''), 0.0),
                                 cal_map, t.get('clndr_id', ''))
@@ -1024,7 +1028,13 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
             on_current += 1
         if days > max_days:
             long_ones.append({'activity': _code(t), 'working_days': days, 'basis': basis})
-    denom = len(pop)
+    denom = len(pop) - len(blank)
+    if denom == 0:
+        return INFO, None, threshold, (
+            f'High Duration NOT SCORED: none of the {len(pop)} incomplete non-milestone '
+            'activities carries an original duration.'
+        ), {'high_duration_count': 0, 'max_days': max_days, 'assessed': False,
+            'examples': [], 'blank_duration_left_out': blank, 'counts': _ns_counts()}
     pct = len(long_ones) / denom * 100.0
     ok = _at_most_pct(len(long_ones), denom, threshold)
     sev = PASS if ok else WARN
@@ -1033,6 +1043,8 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
     if left_out:
         basis_txt += (f' {len(left_out)} carry an Activity ID that appears more than '
                       f'once in a file and were read on the current duration.')
+    if blank:
+        basis_txt += f' {len(blank)} with no original duration are left out.'
     return sev, pct, threshold, (
         f'{len(long_ones)} of {denom} non-milestone activities ({pct:.1f}%) have '
         f'an original duration > {max_days}d (threshold ≤ {threshold}%).' + basis_txt
@@ -1041,6 +1053,7 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
         'assessed': True, 'examples': [x['activity'] for x in long_ones],
         'long_activities': long_ones, 'baseline_basis_count': on_baseline,
         'current_basis_count': on_current, 'ambiguous_left_out': left_out,
+        'blank_duration_left_out': blank,
         'counts': _counts(STATUS_PASS if ok else STATUS_FAIL, len(long_ones), denom, pct)}
 
 
@@ -1086,14 +1099,9 @@ def _check_09_invalid_dates(work_tasks, data_date_dt, profile, correction=None):
         return INFO, None, threshold, (
             'Invalid Dates NOT SCORED: the project has no activities to measure.'
         ), {'issues': [], 'assessed': False, 'counts': _ns_counts()}
-    if incomplete and not any(_parse_date(t.get('early_start_date', ''))
-                              or _parse_date(t.get('early_end_date', ''))
-                              for t in incomplete):
-        return INFO, None, threshold, (
-            f'Invalid Dates NOT SCORED: none of the {len(incomplete)} incomplete '
-            f'activities carries an early start or early finish, so the forecasts '
-            f'cannot be read. Recalculate the schedule in P6 and re-export.'
-        ), {'issues': [], 'assessed': False, 'counts': _ns_counts()}
+    # No readable forecasts does not make #9 NOT SCORED: the actual dates are
+    # still judged (an actual after the data date is a known failure), and the
+    # unread forecasts are disclosed below.
     dd = data_date_dt.date()
     issues = []
     invalid, forecast_bad, actual_bad, unread = [], [], [], []
@@ -1237,9 +1245,17 @@ def _baseline_project_tasks(baseline_data, project, work_tasks):
         return None, '', ''
     rows = list(get_table(baseline_data, 'TASK'))
     projects = get_table(baseline_data, 'PROJECT')
+    codes = {_norm_code(t.get('task_code', '')) for t in work_tasks} - {''}
+
+    def _usable(picked, chosen, how):
+        if not any(_is_work_task(t) and _norm_code(t.get('task_code', '')) in codes for t in picked):
+            return [], '', ('the baseline project (' + how + ') shares no Activity ID with the '
+                            'assessed project, so it is not used')
+        return picked, chosen, how
+
     if len(projects) <= 1:
-        return (rows, projects[0].get('proj_id', '') if projects else '',
-                'only project in the baseline file')
+        return _usable(rows, projects[0].get('proj_id', '') if projects else '',
+                       'only project in the baseline file')
     pid = (project or {}).get('proj_id', '')
     short = (project or {}).get('proj_short_name', '')
     # Ties (two projects with the same short name, or sharing equally many
@@ -1255,7 +1271,6 @@ def _baseline_project_tasks(baseline_data, project, work_tasks):
         chosen = max(same_short, key=d0).get('proj_id', '')
         how = 'same short name'
     else:
-        codes = {_norm_code(t.get('task_code', '')) for t in work_tasks} - {''}
         shared = {}
         for t in rows:
             if _is_work_task(t) and _norm_code(t.get('task_code', '')) in codes:
@@ -1267,7 +1282,7 @@ def _baseline_project_tasks(baseline_data, project, work_tasks):
         chosen = max(projects, key=lambda p: (len(shared.get(p.get('proj_id', ''), ())),)
                      + d0(p)).get('proj_id', '')
         how = 'most shared activity codes'
-    return [t for t in rows if t.get('proj_id', '') == chosen], chosen, how
+    return _usable([t for t in rows if t.get('proj_id', '') == chosen], chosen, how)
 
 
 def _ambiguous_ids(*row_sets):
@@ -1594,10 +1609,18 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
                    '(unbounded/sentinel finish) — CPLI not computable.')
 
     fin_code = (finish_task or {}).get('task_code', '')
+    pinned = [c for c in ((finish_task or {}).get('cstr_type', ''), (finish_task or {}).get('cstr_type2', ''))
+              if c in DCMA_MANDATORY_CONSTRAINTS]
+    if pinned:
+        return _ns(f'CPLI NOT SCORED: the completion activity {fin_code} is pinned by {pinned[0]}, so P6 '
+                   'sets its finish and float from the constraint and CPLI would read 1.000 by '
+                   'construction. #12 fails it instead.', cp_length_days=cp_length_days)
 
     def _graded(tf_days, basis, text, **extra):
         cpli = (cp_length_days + tf_days) / cp_length_days
-        ok = Fraction(cp_length_days + tf_days) >= Fraction(str(threshold)) * Fraction(cp_length_days)
+        # D7: an index is compared after rounding to six decimal places, so a
+        # CPLI of exactly 0.95 passes (a binary sum just under it used to fail).
+        ok = round(cpli, 6) >= round(float(threshold), 6)
         sev = PASS if ok else BLOCK
         return sev, cpli, threshold, (
             f'CPLI = {cpli:.3f} (threshold ≥ {threshold}). CP length = '
@@ -1749,7 +1772,9 @@ def _check_14_bei(work_tasks, baseline_tasks, data_date_dt, profile,
         completed.append(_code(ct))
 
     bei = len(completed) / len(due)
-    ok = Fraction(len(completed)) >= Fraction(str(threshold)) * len(due)
+    # D7: an index is compared after rounding to six decimal places, as #13
+    # and the dashboard compare it (exact counts differ only past 100,000 due).
+    ok = round(bei, 6) >= round(float(threshold), 6)
     sev = PASS if ok else WARN
     left_out = len(due_left_out) + len(done_left_out)
     tail = (f' {left_out} activit{"y carries" if left_out == 1 else "ies carry"} an '
@@ -2200,7 +2225,8 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
             if not _is_work_task(bt):
                 continue
             key = _norm_code(bt.get('task_code', ''))
-            if key and key not in ambiguous:
+            # A blank baseline duration is no basis: the current one is read.
+            if key and key not in ambiguous and str(bt.get('target_drtn_hr_cnt', '') or '').strip():
                 bl_days[key] = _hrs_to_days(_safe_float(bt.get('target_drtn_hr_cnt', ''), 0.0),
                                             bl_cal_map, bt.get('clndr_id', ''))
         baseline_basis = {'days': bl_days, 'ambiguous': ambiguous}

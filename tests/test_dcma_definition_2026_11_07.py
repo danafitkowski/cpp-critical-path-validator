@@ -181,7 +181,7 @@ def test_a_nuclear_result_names_the_profile_and_says_the_threshold_is_cpps():
     tasks, preds = _chain()
     result = dcma_14_assess(_loaded(_schedule(tasks, preds)), profile='nuclear')
     one = result['per_check']['DCMA-01-Logic']
-    assert one['threshold'] == 2.0                  # this repository's nuclear profile
+    assert one['threshold'] == 1.0                  # CPP's nuclear profile (as CPP's own engines)
     assert "is CPP's, derived from DCMA check #1 (5)" in one['message'], one['message']
     assert 'Nuclear' in one['message']
     assert one['details']['profile_threshold']['dcma_thresholds'] == {

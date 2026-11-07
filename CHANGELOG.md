@@ -39,10 +39,13 @@ exact counts, never on a rounded percentage. Per check:
 - **#6 High float, #7 Negative float.** Milestones are no longer counted.
 - **#8 High duration.** Reads the original duration (the baseline's, when a baseline is
   supplied and the activity is in it), not the remaining duration, and says how many
-  activities were read on each basis.
+  activities were read on each basis. A blank original duration is not zero: the activity
+  is left out of both counts and the number is disclosed (not scored when none carries
+  one). A blank baseline duration reads the current one.
 - **#9 Invalid dates.** Dates are compared by calendar day: an actual later on the data
-  date's own day is valid. Not scored only with no data date, or when no incomplete
-  activity carries an early date to read. A data date filled from the planned start is
+  date's own day is valid. Not scored only with no data date. When no incomplete
+  activity carries an early date, the actual dates are still judged and the result says
+  the forecasts could not be read. A data date filled from the planned start is
   disclosed.
 - **#10 Resources.** Passes only when every incomplete ordinary activity of at least one
   working day carries an assignment with hours or cost, on every profile (the bundled
@@ -60,15 +63,30 @@ exact counts, never on a rounded percentage. Per check:
   shift times, from the data date to the completion's early finish. The float is the
   working time to the baseline finish of the same activity, or, with no baseline, the P6
   float where the file has a deadline or that float is not zero; otherwise not scored.
+  The deadline is a Finish On or Before on the completion; a completion pinned by a
+  mandatory constraint is not scored (#12 fails it). The index is compared after
+  rounding to six decimal places, so a CPLI of exactly 0.95 passes.
 - **#14 BEI.** Ordinary activities only in both counts; the numerator counts every
-  activity complete as of the data date, so the index can exceed 1.0.
+  activity complete as of the data date, so the index can exceed 1.0. Compared after
+  rounding to six decimal places, as #13.
 - **Projects.** A file with one project is read whole; with several, the latest data
   date is scored (ties to the most activities, then file order), and the result says
-  which. A baseline file with several projects is matched the same way, and one that
-  shares no Activity ID with the scored project is not used.
+  which. A baseline file with several projects is matched the same way. A baseline
+  project that shares no Activity ID with the scored project is not used, whichever rule
+  chose it and however many projects the baseline file holds: #11, #13 and #14 are not
+  scored and #8 reads current durations.
+- **The critical path report** (`validate_critical_path`) chooses its project in a
+  multi-project file by the same rule. It chose the project with the most activities,
+  so on such a file the report and its own DCMA-14 block could grade different projects.
+  `project_index` is now a rank in that order (0 is the project the DCMA-14 block
+  scores).
 - **Profiles.** A result graded on the nuclear or mining profile names the profile and
   says its threshold is CPP's, derived from the DCMA check. The commercial profile is
-  DCMA's.
+  DCMA's. The nuclear and mining profiles now carry the thresholds CPP's own tools use;
+  this repository's copies differed on 14 values. Nuclear: #1 1% (was 2%), #3 2% (3%),
+  #5 2% (3%), #6 over 30 working days (44), #8 over 20 working days (30). Mining: #1 5%
+  (8%), #3 10% (8%), #6 over 90 working days and 10% (60, 8%), #8 over 90 working days and
+  10% (60, 8%), #11 5% (8%), #13 0.93 (0.90), #14 0.92 (0.90).
 - **Messages** say NOT SCORED where they said NOT ASSESSED.
 
 ### Added

@@ -125,26 +125,32 @@ def test_the_embedded_dcma_block_describes_the_project_the_report_names():
     Before the fix the block was computed on NEW and said "1 activities with
     negative total float", BLOCK, inside a report titled OLD.
     """
+    # 2026-11-07 DCMA review: the report now chooses by DCMA definition D0
+    # (latest data date), as the DCMA engine does, so it is about NEW; the
+    # point of this test stands: the embedded block grades the report's own
+    # project (NEW: one activity at -8 h, status date 12 January).
     v = _validate(_old_and_new())
-    assert v['project_name'] == 'OLD' and v['total_activities'] == 2
+    assert v['project_name'] == 'NEW'
     block = v['dcma_14']
     seven = block['per_check']['DCMA-07-NegFloat']
-    assert seven['value'] == 0 and seven['severity'] == 'PASS', seven['message']
-    assert 'status date 2026-01-05' in block['per_check']['DCMA-09-InvalidDates']['message']
+    assert seven['value'] == 1, seven['message']
+    assert 'status date 2026-01-12' in block['per_check']['DCMA-09-InvalidDates']['message']
     # ... and the block names the project it graded
-    assert block.get('proj_id') == 'OLD', block.get('proj_id')
-    assert block['project_name'] == 'OLD'
-    assert block['data_date'] == '2026-01-05 08:00'
+    assert block.get('proj_id') == 'NEW', block.get('proj_id')
+    assert block['project_name'] == 'NEW'
+    assert block['data_date'] == '2026-01-12 08:00'
 
 
 def test_project_index_reaches_the_dcma_block_too():
     """The same section 4.7 count, for the caller who asks for the second
     project: the report and its DCMA block both move to NEW, where one
     activity carries -8 h."""
+    # 2026-11-07 DCMA review: index 1 is the second project in D0's order
+    # (OLD, the earlier data date); its block moves with it.
     v = _validate(_old_and_new(), project_index=1)
-    assert v['project_name'] == 'NEW'
-    assert v['dcma_14']['per_check']['DCMA-07-NegFloat']['value'] == 1
-    assert v['dcma_14']['proj_id'] == 'NEW'
+    assert v['project_name'] == 'OLD'
+    assert v['dcma_14']['per_check']['DCMA-07-NegFloat']['value'] == 0
+    assert v['dcma_14']['proj_id'] == 'OLD'
 
 
 def test_a_direct_caller_keeps_the_latest_data_date_rule_and_is_told_the_pick():

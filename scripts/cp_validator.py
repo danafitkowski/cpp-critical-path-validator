@@ -502,17 +502,14 @@ def validate_critical_path(data, project_index=0, profile='commercial',
 
     # Filter to target project if multi-project XER
     if projects and len(projects) > 1:
-        # Find the non-dummy project (has activities)
-        proj_task_counts = {}
-        for t in tasks_all:
-            pid = t.get('proj_id', '')
-            proj_task_counts[pid] = proj_task_counts.get(pid, 0) + 1
-        # Pick project with most tasks, or use index
-        sorted_projs = sorted(proj_task_counts.items(), key=lambda x: -x[1])
-        if sorted_projs:
-            target_proj_id = sorted_projs[project_index][0]
-        else:
-            target_proj_id = projects[project_index]['proj_id']
+        # DCMA definition D0: the latest data date, then the most TASK rows,
+        # then file order, the same project the DCMA engine scores. This
+        # picked the most TASK rows, so on a two-project file this report and
+        # its own DCMA block could grade different projects. project_index is
+        # a rank in that order (0 = the D0 choice).
+        from dcma14 import _d0_rank_key
+        ranked = sorted(projects, key=_d0_rank_key(tasks_all), reverse=True)
+        target_proj_id = ranked[project_index]['proj_id']
     elif projects:
         target_proj_id = projects[0]['proj_id']
     else:

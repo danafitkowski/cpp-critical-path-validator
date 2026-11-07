@@ -2,32 +2,90 @@
   "version": 1,
   "date": "2026-11-07",
   "source": "DCMA-EA PAM 200.1 (October 2012) section 4; read as written in DCMA_DEFINITION.md",
-  "ordinary_types": ["TT_Task", "TT_Rsrc"],
-  "milestone_types": ["TT_Mile", "TT_FinMile"],
-  "excluded_types": ["TT_LOE", "TT_WBS"],
+  "ordinary_types": [
+    "TT_Task",
+    "TT_Rsrc"
+  ],
+  "milestone_types": [
+    "TT_Mile",
+    "TT_FinMile"
+  ],
+  "excluded_types": [
+    "TT_LOE",
+    "TT_WBS"
+  ],
   "complete_status": "TK_Complete",
-  "hard_constraints": ["CS_MSO", "CS_MEO", "CS_MSOB", "CS_MEOB", "CS_MANDSTART", "CS_MANDFIN"],
-  "mandatory_constraints": ["CS_MANDSTART", "CS_MANDFIN"],
-  "deadline_constraints": ["CS_MEO", "CS_MEOB", "CS_MANDFIN"],
+  "hard_constraints": [
+    "CS_MSO",
+    "CS_MEO",
+    "CS_MSOB",
+    "CS_MEOB",
+    "CS_MANDSTART",
+    "CS_MANDFIN"
+  ],
+  "mandatory_constraints": [
+    "CS_MANDSTART",
+    "CS_MANDFIN"
+  ],
+  "deadline_constraints": [
+    "CS_MEO",
+    "CS_MEOB"
+  ],
   "fallback_hours_per_day": 8,
   "thresholds": {
-    "1": {"max_pct": 5},
-    "2": {"max_count": 0},
-    "3": {"max_pct": 5, "info_lag_working_days": 44},
-    "4": {"min_fs_pct": 90},
-    "5": {"max_pct": 5},
-    "6": {"max_pct": 5, "float_working_days": 44},
-    "7": {"max_count": 0},
-    "8": {"max_pct": 5, "duration_working_days": 44},
-    "9": {"max_count": 0},
-    "10": {"min_pct": 100, "min_duration_working_days": 1},
-    "11": {"max_pct": 5, "min_match_pct": 80},
-    "13": {"min_index": 0.95},
-    "14": {"min_index": 0.95}
+    "1": {
+      "max_pct": 5
+    },
+    "2": {
+      "max_count": 0
+    },
+    "3": {
+      "max_pct": 5,
+      "info_lag_working_days": 44
+    },
+    "4": {
+      "min_fs_pct": 90
+    },
+    "5": {
+      "max_pct": 5
+    },
+    "6": {
+      "max_pct": 5,
+      "float_working_days": 44
+    },
+    "7": {
+      "max_count": 0
+    },
+    "8": {
+      "max_pct": 5,
+      "duration_working_days": 44
+    },
+    "9": {
+      "max_count": 0
+    },
+    "10": {
+      "min_pct": 100,
+      "min_duration_working_days": 1
+    },
+    "11": {
+      "max_pct": 5,
+      "min_match_pct": 80
+    },
+    "13": {
+      "min_index": 0.95
+    },
+    "14": {
+      "min_index": 0.95
+    }
   },
   "grade": {
-    "a": 90, "b": 75, "c": 60, "d": 45,
-    "green": 85, "yellow": 65,
+    "a": 90,
+    "b": 75,
+    "c": 60,
+    "d": 45,
+    "green": 85,
+    "yellow": 65,
     "min_scored_for_letter": 10
-  }
+  },
+  "index_round_decimals": 6
 }

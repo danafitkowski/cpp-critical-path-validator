@@ -115,7 +115,7 @@
    "11": {
     "status": "FAIL",
     "num": 3,
-    "den": 8
+    "den": 7
    },
    "13": {
     "status": "FAIL",
@@ -123,8 +123,8 @@
    },
    "14": {
     "status": "FAIL",
-    "num": 8,
-    "den": 9
+    "num": 7,
+    "den": 8
    }
   }
  },
@@ -150,8 +150,7 @@
     "status": "FAIL"
    },
    "13": {
-    "status": "PASS",
-    "value": 1.0
+    "status": "NS"
    }
   }
  },
@@ -259,6 +258,68 @@
    "13": {
     "status": "FAIL",
     "value": 0.5
+   }
+  }
+ },
+ "p11_short_day": {
+  "current": "p11_short_day.xer",
+  "baseline": null,
+  "checks": {
+   "13": {
+    "status": "FAIL",
+    "value": 0.714
+   }
+  }
+ },
+ "p12_exact_095": {
+  "current": "p12_exact_095.xer",
+  "baseline": null,
+  "checks": {
+   "13": {
+    "status": "PASS",
+    "value": 0.95
+   }
+  }
+ },
+ "p13_unrelated_baseline": {
+  "current": "p13_current.xer",
+  "baseline": "p13_baseline.xer",
+  "checks": {
+   "8": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 1
+   },
+   "11": {
+    "status": "NS"
+   },
+   "13": {
+    "status": "NS"
+   },
+   "14": {
+    "status": "NS"
+   }
+  }
+ },
+ "p14_durations": {
+  "current": "p14_current.xer",
+  "baseline": "p14_baseline.xer",
+  "checks": {
+   "8": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 3
+   }
+  }
+ },
+ "p15_no_forecasts": {
+  "current": "p15_no_forecasts.xer",
+  "baseline": null,
+  "checks": {
+   "9": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 5
    }
   }
  }
