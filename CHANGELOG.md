@@ -39,9 +39,10 @@ exact counts, never on a rounded percentage. Per check:
 - **#6 High float, #7 Negative float.** Milestones are no longer counted.
 - **#8 High duration.** Reads the original duration (the baseline's, when a baseline is
   supplied and the activity is in it), not the remaining duration, and says how many
-  activities were read on each basis. A blank original duration is not zero: the activity
-  is left out of both counts and the number is disclosed (not scored when none carries
-  one). A blank baseline duration reads the current one.
+  activities were read on each basis. A blank or non-numeric original duration is not
+  zero: the activity is left out of both counts and the number is disclosed (not scored
+  when none carries a readable one). A blank or non-numeric baseline duration reads the
+  current one.
 - **#9 Invalid dates.** Dates are compared by calendar day: an actual later on the data
   date's own day is valid. Not scored only with no data date. When no incomplete
   activity carries an early date, the actual dates are still judged and the result says
@@ -70,8 +71,9 @@ exact counts, never on a rounded percentage. Per check:
   activity complete as of the data date, so the index can exceed 1.0. Compared after
   rounding to six decimal places, as #13.
 - **Projects.** A file with one project is read whole; with several, the latest data
-  date is scored (ties to the most activities, then file order), and the result says
-  which. A baseline file with several projects is matched the same way. A baseline
+  date as filed is scored (ties to the most activities, then file order), and the result
+  says which. The choice is made on the filed dates, before a blank data date is read as
+  the planned start or an earlier one lifted to it. A baseline file with several projects is matched the same way. A baseline
   project that shares no Activity ID with the scored project is not used, whichever rule
   chose it and however many projects the baseline file holds: #11, #13 and #14 are not
   scored and #8 reads current durations.
@@ -79,7 +81,9 @@ exact counts, never on a rounded percentage. Per check:
   multi-project file by the same rule. It chose the project with the most activities,
   so on such a file the report and its own DCMA-14 block could grade different projects.
   `project_index` is now a rank in that order (0 is the project the DCMA-14 block
-  scores).
+  scores). A file with one project is read whole by the report too, as by its DCMA-14
+  block: activities filed under a project ID no PROJECT row names were left out of the
+  report's own counts.
 - **Profiles.** A result graded on the nuclear or mining profile names the profile and
   says its threshold is CPP's, derived from the DCMA check. The commercial profile is
   DCMA's. The nuclear and mining profiles now carry the thresholds CPP's own tools use;

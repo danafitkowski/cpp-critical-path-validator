@@ -508,7 +508,7 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         # its own DCMA block could grade different projects. project_index is
         # a rank in that order (0 = the D0 choice).
         from dcma14 import _d0_rank_key
-        ranked = sorted(projects, key=_d0_rank_key(tasks_all), reverse=True)
+        ranked = sorted(projects, key=_d0_rank_key(tasks_all, data), reverse=True)
         target_proj_id = ranked[project_index]['proj_id']
     elif projects:
         target_proj_id = projects[0]['proj_id']
@@ -516,7 +516,11 @@ def validate_critical_path(data, project_index=0, profile='commercial',
         target_proj_id = None
 
     if target_proj_id:
-        tasks = [t for t in tasks_all if t.get('proj_id', '') == target_proj_id]
+        # DCMA definition D0: a file with ONE PROJECT row is read whole, whatever
+        # project ID its activities carry, as the embedded DCMA block reads it.
+        # With several, only the chosen one's.
+        tasks = (list(tasks_all) if len(projects) <= 1
+                 else [t for t in tasks_all if t.get('proj_id', '') == target_proj_id])
         project = next((p for p in projects if p.get('proj_id', '') == target_proj_id), projects[0] if projects else {})
     else:
         tasks = tasks_all

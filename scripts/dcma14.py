@@ -460,6 +460,21 @@ def _baseline_finish(bt):
             or _parse_date(bt.get('early_end_date', '')))
 
 
+def _readable_hours(v):
+    """A duration cell as hours, or None when it is blank or not a finite
+    number. An unreadable duration is no duration: #8 leaves it out rather than
+    reading it as zero (review of 7-Nov-26, round 2: four 'unknown' durations
+    read PASS 0 of 4)."""
+    raw = str(v if v is not None else '').strip()
+    if not raw:
+        return None
+    try:
+        x = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return x if x == x and x not in (float('inf'), float('-inf')) else None
+
+
 def _completion_tie_rank(t):
     """D11 tie order: a finish milestone, then an activity of zero original
     duration (a completion typed as a task), then anything else."""
@@ -505,18 +520,29 @@ def _completion_activity(work_tasks):
         [t for t in work_tasks if _is_work_task(t)], _early_or_planned_finish)
 
 
-def _d0_rank_key(rows):
+def _d0_rank_key(rows, data=None):
     """D0's order for choosing one project among several: the latest
     last_recalc_date, then the most TASK rows in `rows`. max() over a list in
     file order keeps the first of equal keys, which is D0's last tie-break.
-    D9 breaks its own ties the same way."""
+    D9 breaks its own ties the same way.
+
+    The project is chosen on the data dates AS FILED, before D14 fills or lifts
+    one (review of 7-Nov-26, round 2: the parser lifts an early data date to the
+    planned start in place, and ranking on the lifted date chose a different
+    project from the dashboard and Lens). `data`, the parsed file, carries the
+    parser's record of what it changed (data_date_filled); without it the
+    PROJECT rows are read as they stand."""
     counts = {}
     for t in rows or ():
         counts[t.get('proj_id', '')] = counts.get(t.get('proj_id', ''), 0) + 1
+    filed = {}
+    for e in ((data or {}).get('data_date_filled') or ()) if isinstance(data, dict) else ():
+        filed[str(e.get('proj_id', ''))] = e.get('filed_data_date', '') or ''
 
     def _key(p):
-        return (_parse_date(p.get('last_recalc_date', '')) or datetime.min,
-                counts.get(p.get('proj_id', ''), 0))
+        pid = p.get('proj_id', '')
+        dd = filed[str(pid)] if str(pid) in filed else p.get('last_recalc_date', '')
+        return (_parse_date(dd) or datetime.min, counts.get(pid, 0))
     return _key
 
 
@@ -1017,8 +1043,8 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
         if baseline_basis is not None and key and key not in ambiguous and key in bl_days:
             days, basis = bl_days[key], 'baseline'
             on_baseline += 1
-        elif not str(t.get('target_drtn_hr_cnt', '') or '').strip():
-            # A blank duration is not zero: it is left out and counted.
+        elif _readable_hours(t.get('target_drtn_hr_cnt', '')) is None:
+            # A blank or unreadable duration is not zero: it is left out and counted.
             blank.append(_code(t))
             continue
         else:
@@ -1032,7 +1058,7 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
     if denom == 0:
         return INFO, None, threshold, (
             f'High Duration NOT SCORED: none of the {len(pop)} incomplete non-milestone '
-            'activities carries an original duration.'
+            'activities carries a readable original duration.'
         ), {'high_duration_count': 0, 'max_days': max_days, 'assessed': False,
             'examples': [], 'blank_duration_left_out': blank, 'counts': _ns_counts()}
     pct = len(long_ones) / denom * 100.0
@@ -1044,7 +1070,7 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
         basis_txt += (f' {len(left_out)} carry an Activity ID that appears more than '
                       f'once in a file and were read on the current duration.')
     if blank:
-        basis_txt += f' {len(blank)} with no original duration are left out.'
+        basis_txt += f' {len(blank)} with no readable original duration are left out.'
     return sev, pct, threshold, (
         f'{len(long_ones)} of {denom} non-milestone activities ({pct:.1f}%) have '
         f'an original duration > {max_days}d (threshold ≤ {threshold}%).' + basis_txt
@@ -1262,7 +1288,7 @@ def _baseline_project_tasks(baseline_data, project, work_tasks):
     # Activity IDs) are broken as D0 breaks them: the latest data date, then
     # the most TASK rows, then file order (2026-11-07, the written definition; ties went
     # to the first in the file).
-    d0 = _d0_rank_key(rows)
+    d0 = _d0_rank_key(rows, baseline_data)
     same_short = [p for p in projects
                   if short and p.get('proj_short_name', '') == short]
     if pid and any(p.get('proj_id', '') == pid for p in projects):
@@ -2160,7 +2186,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
         selection = 'chosen by the caller'
     elif projects and len(projects) > 1:
         # max() keeps the first of equal ranks: file order breaks the last tie.
-        target_pid = max(projects, key=_d0_rank_key(tasks_all)).get('proj_id', '')
+        target_pid = max(projects, key=_d0_rank_key(tasks_all, data)).get('proj_id', '')
         selection = ('the latest data date (last_recalc_date), ties broken by the '
                      'most TASK rows, then file order')
     else:
@@ -2226,7 +2252,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
                 continue
             key = _norm_code(bt.get('task_code', ''))
             # A blank baseline duration is no basis: the current one is read.
-            if key and key not in ambiguous and str(bt.get('target_drtn_hr_cnt', '') or '').strip():
+            if key and key not in ambiguous and _readable_hours(bt.get('target_drtn_hr_cnt', '')) is not None:
                 bl_days[key] = _hrs_to_days(_safe_float(bt.get('target_drtn_hr_cnt', ''), 0.0),
                                             bl_cal_map, bt.get('clndr_id', ''))
         baseline_basis = {'days': bl_days, 'ambiguous': ambiguous}
