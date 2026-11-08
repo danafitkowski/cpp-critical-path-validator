@@ -658,8 +658,8 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
             return {'ran': True, 'status': 'FAIL', 'test_activity': c, 'completion_activity': comp_code,
                     'delay_days': DELAY_WORKING_DAYS, 'slip_days': None, 'lost_at': c,
                     'driving_path': path, 'start_delay': True,
-                    'message': ("Critical Path Test FAILS: recalculated on the CPP CPM engine, %s (an unfinished "
-                                "activity on the completion's driving path that drives it through its start) "
+                    'message': ("Critical Path Test FAILS: %s (an unfinished activity on the completion's "
+                                "driving path that drives it through its start) "
                                 "cannot take a start delay of %d working days: its %s holds its start, so a "
                                 "constraint, not logic, holds the critical path there.%s"
                                 % (c, DELAY_WORKING_DAYS, ' and '.join(pinned_start), _extra()))}, None
