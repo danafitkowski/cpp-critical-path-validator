@@ -74,16 +74,21 @@ exact counts, never on a rounded percentage. Per check:
   working days added to the unfinished activity on the completion's driving path nearest
   the data date whose finish drives that path, and #12 passes only when the completion
   moves by the delay; a failure names the activity where the delay is lost and what holds
-  it. A test activity a constraint holds fails there (its date sits on the constraint's,
-  a weekend date counting as the working time beside it, or a constraint drives it), with
-  the completion's move measured; one that does not take the delay for no reason the test
-  can name is not scored. A smaller move passes only when every activity after the test
+  it. A test activity a finish constraint holds fails there (its finish sits on the
+  constraint's date, a weekend date counting as the working time beside it, or a
+  constraint drives it), with the completion's move measured; one that does not take the
+  delay for no reason the test can name is not scored. An unfinished activity nearer the
+  data date that drives the path only through its start then takes a start delay (its
+  start held 600 working days later), which decides #12; one whose start a constraint
+  already holds fails there, and a path carried only by start links is tested the same
+  way. A smaller move passes only when every activity after the test
   activity on the as-filed path moved later, none on that path or on the delayed driving
   chain had its finish set by an expected finish or sits on a constraint, the completion
   is still driven back through it, and the path crosses another calendar or carries a lag
   (the result then says the calendars or lags set the amount). A full move along another
   path names what held the as-filed one, and P6's own longest-path flag off the tested
-  path is disclosed. The test is not run on a network of more than 5,000
+  path is disclosed, as is any other path of the same length into the completion that
+  the delay did not reach. The test is not run on a network of more than 5,000
   activities, or past 20 seconds for the run as filed and 60 for the whole test (above
   100 activities each recalculation runs in a separate process that is stopped at the
   limit), nor where #12 is already decided (a pinned completion, or one with no
@@ -96,8 +101,11 @@ exact counts, never on a rounded percentage. Per check:
   finding); it no longer fails.
 - **#13 CPLI.** The critical path length is the working time on the project calendar's
   shift times, from the data date to the completion's early finish. The float is the
-  working time to the baseline finish of the same activity, or, with no baseline, the P6
-  float where the file has a deadline or that float is not zero; otherwise not scored.
+  working time to the baseline finish of the same activity, or, with no baseline, the
+  working time to a deadline date the file names (the project's Must Finish By, or a
+  Finish On or Finish On or Before date on the completion; no exported float is needed),
+  else the P6 float where it is not zero; otherwise not scored. A finished completion is
+  not scored.
   The deadline is the project's Must Finish By, or a Finish On or Finish On or Before on the completion,
   and its float is the working time from the forecast finish to that date on the project
   calendar (the earliest date when several), so both terms are in the same working days;

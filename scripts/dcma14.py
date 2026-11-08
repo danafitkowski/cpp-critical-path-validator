@@ -1605,7 +1605,7 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None, cpt
     # from it (no unfinished work drives the completion) says why.
     if cpt and cpt.get('ran'):
         det.update({k: cpt.get(k) for k in ('test_activity', 'delay_days', 'slip_days',
-                                            'finish_before', 'finish_after', 'driving_path')})
+                                            'finish_before', 'finish_after', 'driving_path', 'lost_at')})
         det['test_run'] = True
         if cpt['status'] in ('PASS', 'FAIL'):
             ok = cpt['status'] == 'PASS'
@@ -1698,6 +1698,11 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
                    '(unbounded/sentinel finish) — CPLI not computable.')
 
     fin_code = (finish_task or {}).get('task_code', '')
+    if finish_task is not None and _is_complete(finish_task):
+        # A finished completion has no remaining critical path, and its pin no
+        # longer applies; #12 does not fail it either.
+        return _ns(f'CPLI NOT SCORED: the completion activity {fin_code} is complete, so there is no '
+                   'remaining critical path to measure.', cp_length_days=cp_length_days)
     pinned = [c for c in ((finish_task or {}).get('cstr_type', ''), (finish_task or {}).get('cstr_type2', ''))
               if c in DCMA_MANDATORY_CONSTRAINTS]
     if pinned:
@@ -1775,10 +1780,6 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
                    'read 1.000. Supply the baseline XER, or a Must Finish By date '
                    'in P6.', basis=None, cp_length_days=cp_length_days,
                    finish_activity=fin_code)
-    if tf_hrs is None:
-        return _ns('CPLI NOT SCORED: the project finish activity carries no '
-                   'computed total float — CPLI not computable. Recalculate the '
-                   'schedule in P6 and re-export.', cp_length_days=cp_length_days)
     # A NAMED deadline date (Must Finish By, or the date of a Finish On / Finish
     # On or Before on the completion; the earliest when several): the float is
     # the working time from the forecast finish to that date on the project
@@ -1805,6 +1806,12 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
             f'float to the deadline ({label}) = {tf_days:+.1f}d, the working time '
             f'on the project calendar (no baseline).'),
             deadline=str(date_deadline))
+    # Only the P6-float fallback needs the exported float; a named deadline
+    # date above does not.
+    if tf_hrs is None:
+        return _ns('CPLI NOT SCORED: the project finish activity carries no '
+                   'computed total float — CPLI not computable. Recalculate the '
+                   'schedule in P6 and re-export.', cp_length_days=cp_length_days)
     tf_days = _hrs_to_days(tf_hrs, cal_map, (finish_task or {}).get('clndr_id', ''))
     deadline = ('the date P6 measured it against (the file names no Must '
                 'Finish By or finish constraint date, but the float is not zero)')
@@ -2456,7 +2463,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
         _comp, _ = _completion_activity(work_tasks)
         # Not run where #12 is decided without it: a completion pinned by a
         # Mandatory Start or Finish fails, one with no predecessor is not
-        # scored (Claude AI review of the test, 8-Nov-26: both recalculations
+        # scored (review of 8-Nov-26: both recalculations
         # ran, up to 60 seconds, on exactly those schedules).
         _pinned = _comp is not None and any(
             (_comp.get(k) or '').strip() in DCMA_MANDATORY_CONSTRAINTS for k in ('cstr_type', 'cstr_type2'))

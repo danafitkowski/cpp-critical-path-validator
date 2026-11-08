@@ -1,4 +1,4 @@
-"""DCMA #12, the Critical Path Test: the Claude AI review of the test (8-Nov-26).
+"""DCMA #12, the Critical Path Test: the review of the test (8-Nov-26).
 
 Each case is fixture p22 (A1 -> A2 -> F, A2 held by a Mandatory Start) edited
 in memory. The review built three wrong passes and a contradiction:
@@ -129,20 +129,101 @@ def test_a_failure_does_not_contradict_the_engine_on_the_driver(monkeypatch):
 
 
 @needs_engine
-def test_an_activity_passed_over_for_its_start_link_is_named(monkeypatch):
-    # A1 drives A2 only through its start: the delay goes on A2, and the
-    # result says A1 was passed over.
-    data = _p22()
-    _task(data, 'A2')['cstr_type'] = ''
-    _task(data, 'A2')['cstr_date'] = ''
+def test_an_activity_that_drives_the_path_through_its_start_takes_a_start_delay(monkeypatch):
+    # A1 drives A2 only through its start. The duration delay goes on A2 and
+    # passes; then A1 takes a start delay, so the stretch it covers is tested
+    # too (review of the test, 8-Nov-26: it was named, not tested).
+    data = _drop_a2_pin(_p22())
     for r in data['tables']['TASKPRED']['records']:
         if r['task_id'] == '10003':
             r['pred_type'] = 'PR_SS'
     pc, raw = _raw(data, monkeypatch)
     assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['test_activity'] == 'A1' and raw['start_delay'] is True
+    assert raw['duration_test'] == {'test_activity': 'A2', 'slip_days': 600.0}
+    assert raw['tried'] == ['A2', 'A1'] and raw['passed_over'] == []
+    assert 'a start delay of 600 working days inserted on A1' in pc['message']
+    assert 'A duration delay of 600 working days on A2, further along the path' in pc['message']
+
+
+@needs_engine
+def test_a_mandatory_start_after_a_start_link_is_found_by_the_start_delay(monkeypatch):
+    # A2's Mandatory Start sat just past a Start-to-Start link; the
+    # duration delay on A2 passed and the pin was never exercised.
+    data = _p22()
+    for r in data['tables']['TASKPRED']['records']:
+        if r['task_id'] == '10003':
+            r['pred_type'] = 'PR_SS'
+    _task(data, 'A2')['cstr_date'] = '2026-06-01 08:00'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'FAIL', pc['message']
+    assert raw['test_activity'] == 'A1' and raw['start_delay'] is True
+    assert 'first lost at A2' in pc['message']
+    assert 'its Mandatory Start of 2026-06-01 08:00 holds it' in pc['message']
+
+
+@needs_engine
+def test_a_path_carried_only_by_start_links_is_tested_by_a_start_delay(monkeypatch):
+    # Every unfinished activity drives the next through its start: this was
+    # NOT SCORED; the start delay on the nearest one now tests the path.
+    data = _drop_a2_pin(_p22())
+    for r in data['tables']['TASKPRED']['records']:
+        if r['task_id'] in ('10003', '10004'):
+            r['pred_type'] = 'PR_SS'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['test_activity'] == 'A1' and raw['start_delay'] is True
+    assert raw['slip_days'] == 600
+
+
+@needs_engine
+def test_a_started_activity_on_a_start_link_is_named_as_not_tested(monkeypatch):
+    # A start that has happened cannot be delayed: the stretch is named.
+    data = _drop_a2_pin(_p22())
+    for r in data['tables']['TASKPRED']['records']:
+        if r['task_id'] == '10003':
+            r['pred_type'] = 'PR_SS'
+    a1 = _task(data, 'A1')
+    a1.update(status_code='TK_Active', act_start_date='2026-05-28 08:00')
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
     assert raw['test_activity'] == 'A2'
-    assert raw['passed_over'] == ['A1']
-    assert 'A1 drives the path only through its start (Start-to-Start) and was passed over' in pc['message']
+    assert ('A start delay could not be inserted on A1, which drives the path through its start, so that '
+            'stretch is not tested: it has started') in pc['message']
+
+
+def _with_path(data, code, task_id, pred_id, hours='40'):
+    a2 = _task(data, 'A2')
+    data['tables']['TASK']['records'].append(dict(a2, task_id=task_id, task_code=code, task_name=code,
+                                                  cstr_type='', cstr_date='', remain_drtn_hr_cnt=hours,
+                                                  target_drtn_hr_cnt=hours))
+    rels = data['tables']['TASKPRED']['records']
+    b = dict(rels[0])
+    rels.append(dict(b, task_pred_id='3' + task_id, task_id=task_id, pred_task_id=pred_id, pred_type='PR_FS'))
+    rels.append(dict(b, task_pred_id='4' + task_id, task_id='10004', pred_task_id=task_id, pred_type='PR_FS'))
+    return data
+
+
+@needs_engine
+def test_an_equal_path_the_delay_did_not_reach_is_named(monkeypatch):
+    # one insertion tests one path. Y runs from the start milestone
+    # into F at the same total float: named as not tested.
+    data = _with_path(_drop_a2_pin(_p22()), 'Y', '10007', '10001', hours='80')
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['untested_paths'] == ['Y']
+    assert ('The completion is also driven, at the same total float, through Y, which the delay did not '
+            'reach; that path is not tested.') in pc['message']
+
+
+@needs_engine
+def test_an_equal_path_the_delay_reached_is_not_named(monkeypatch):
+    # X runs from A1 into F beside A2: the delay on A1 reaches it as well.
+    data = _with_path(_drop_a2_pin(_p22()), 'X', '10005', '10002')
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['parallel_paths'] == ['X'] and raw['untested_paths'] == []
+    assert 'not tested' not in pc['message']
 
 
 def test_a_constraint_is_named_only_where_the_activity_sits_on_its_date():
@@ -192,7 +273,7 @@ def test_no_delayed_run_is_started_without_a_second_left(monkeypatch):
     assert 'before a delayed recalculation could be made' in pc['details'].get('test_not_run_reason', '')
 
 
-# ── The check of these fixes (8-Nov-26): Claude AI and Codex ──
+# ── The check of these fixes (8-Nov-26) ──
 
 def _drop_a2_pin(data):
     _task(data, 'A2')['cstr_type'] = ''
@@ -202,7 +283,7 @@ def _drop_a2_pin(data):
 
 @needs_engine
 def test_a_blank_activity_calendar_takes_the_project_calendar_and_the_first_try(monkeypatch):
-    # Claude AI: the verdict alone cannot show the calendar was resolved; the
+    # the verdict alone cannot show the calendar was resolved; the
     # tried list can. A1 has no calendar on a 10-hour project calendar.
     data = _drop_a2_pin(_p22())
     for c in data['tables']['CALENDAR']['records']:
@@ -217,7 +298,7 @@ def test_a_blank_activity_calendar_takes_the_project_calendar_and_the_first_try(
 
 @needs_engine
 def test_a_mandatory_finish_on_a_weekend_holds_the_test_activity(monkeypatch):
-    # Codex: a Saturday Mandatory Finish holds the Friday close; a literal date
+    # a Saturday Mandatory Finish holds the Friday close; a literal date
     # compare missed it, A1 was skipped and A2 passed.
     data = _drop_a2_pin(_p22())
     _task(data, 'A1')['cstr_type'] = 'CS_MANDFIN'
@@ -230,7 +311,7 @@ def test_a_mandatory_finish_on_a_weekend_holds_the_test_activity(monkeypatch):
 
 @needs_engine
 def test_a_constraint_that_absorbs_part_of_the_delay_fails_with_the_move_measured(monkeypatch):
-    # Codex: A1's Mandatory Finish sat later than its logic; the gap absorbed
+    # A1's Mandatory Finish sat later than its logic; the gap absorbed
     # 260 of the 600 days. A1 was skipped as not moving and A2 passed.
     data = _drop_a2_pin(_p22())
     _task(data, 'A1')['cstr_type'] = 'CS_MANDFIN'
@@ -273,7 +354,7 @@ def test_a_seasonal_path_passes_on_the_calendar_rule_and_names_the_lead(monkeypa
 
 @needs_engine
 def test_an_expected_finish_on_the_new_driving_path_is_not_blamed_on_calendars(monkeypatch):
-    # Codex: F's driver changes to X, whose expected finish re-sizes 41 days;
+    # F's driver changes to X, whose expected finish re-sizes 41 days;
     # the calendar rule checked only the old path and passed it.
     pc, raw = _raw(_seasonal(True), monkeypatch)
     assert pc['counts']['status'] == 'FAIL', pc['message']
@@ -284,7 +365,7 @@ def test_an_expected_finish_on_the_new_driving_path_is_not_blamed_on_calendars(m
 
 @needs_engine
 def test_a_full_move_along_another_path_names_what_held_the_filed_path(monkeypatch):
-    # Claude AI: X ties A2 into F; A2 is pinned and the delay reaches F
+    # X ties A2 into F; A2 is pinned and the delay reaches F
     # through X by the full 600. A PASS, which names A2 and its pin.
     data = _p22()
     a2 = _task(data, 'A2')
@@ -303,7 +384,7 @@ def test_a_full_move_along_another_path_names_what_held_the_filed_path(monkeypat
 
 @needs_engine
 def test_a_finish_that_does_not_take_the_delay_for_no_named_reason_is_not_scored(monkeypatch):
-    # Claude AI: an unexplained absorption is the finding the test exists for;
+    # an unexplained absorption is the finding the test exists for;
     # it is not skipped for the next activity. Here the delayed run is made to
     # leave A1's finish where it was.
     import critical_path_test as cpt
@@ -330,7 +411,7 @@ def test_a_finish_that_does_not_take_the_delay_for_no_named_reason_is_not_scored
 
 @needs_engine
 def test_the_p6_longest_path_flag_off_the_tested_path_is_disclosed(monkeypatch):
-    # Claude AI: the file carries the P6 answer too; on two real files every
+    # the file carries the P6 answer too; on two real files every
     # activity on the tested path read N.
     data = _drop_a2_pin(_p22())
     _task(data, 'A1')['driving_path_flag'] = 'N'
@@ -339,3 +420,61 @@ def test_the_p6_longest_path_flag_off_the_tested_path_is_disclosed(monkeypatch):
     assert raw['p6_off_path'] == 1
     assert ("own longest-path flag in the file marks 1 of the 3 activities on this path, from A1 to the "
             "completion, as off its longest path") in pc['message']
+
+
+# ── The final review (8-Nov-26) ──
+
+@needs_engine
+def test_a_start_a_mandatory_start_holds_cannot_take_the_start_delay(monkeypatch):
+    # A1 drives A2 through its start and is pinned by a Mandatory Start
+    # on its date; the inserted Start On or After overrode the pin and passed.
+    data = _drop_a2_pin(_p22())
+    for r in data['tables']['TASKPRED']['records']:
+        if r['task_id'] == '10003':
+            r['pred_type'] = 'PR_SS'
+    _task(data, 'A1')['cstr_type'] = 'CS_MANDSTART'
+    _task(data, 'A1')['cstr_date'] = '2026-06-08 08:00'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'FAIL', pc['message']
+    assert raw['test_activity'] == 'A1' and raw['lost_at'] == 'A1'
+    assert 'its Mandatory Start of 2026-06-08 08:00 holds its start' in pc['message']
+
+
+def test_a_duration_delay_is_held_only_by_a_finish_constraint():
+    # a start constraint cannot hold a duration delay, which moves a
+    # finish; the duration test reads finish constraints only.
+    from critical_path_test import _constraints_at, _constraints_of
+    task = {'cstr_type': 'CS_MSOA', 'cstr_date': '2027-03-01 08:00',
+            'cstr_type2': 'CS_MANDFIN', 'cstr_date2': '2027-03-05 16:00'}
+    node = {'early_start_dt': '2027-03-01 08:00', 'early_finish_dt': '2027-03-05 16:00'}
+    assert _constraints_at(task, node, kinds='finish') == ['Mandatory Finish of 2027-03-05 16:00']
+    assert _constraints_at(task, node, kinds='start') == ['Start On or After of 2027-03-01 08:00']
+    assert _constraints_of(task, 'finish') == ['Mandatory Finish of 2027-03-05 16:00']
+
+
+@needs_engine
+def test_a_failure_names_where_the_delay_is_lost_for_the_register(monkeypatch):
+    # a handed-in FAIL listed no activity; the result carries it.
+    pc, raw = _raw(_p22(), monkeypatch)
+    assert raw['status'] == 'FAIL' and raw['lost_at'] == 'A2'
+
+
+def test_a_named_deadline_needs_no_exported_float():
+    # A blank float on the completion left a schedule with
+    # a deadline NOT SCORED; the deadline's working time needs no P6 float.
+    data = copy.deepcopy(parse_xer(os.path.join(FX, 'p19_calendar_mix.xer')))
+    for t in data['tables']['TASK']['records']:
+        if t['task_code'] == 'F':
+            t['total_float_hr_cnt'] = ''
+    pc = dcma_14_assess(data)['per_check']['DCMA-13-CPLI']
+    assert pc['counts']['status'] == 'FAIL', pc['message']
+    assert abs(pc['value'] - 0.5) < 1e-6
+
+
+def test_a_finished_completion_is_not_said_to_fail_12():
+    # #13 on a finished, pinned completion said "#12 fails it instead"
+    # beside a NOT SCORED #12.
+    res = dcma_14_assess(parse_xer(os.path.join(FX, 'p16_as_built_mandatory.xer')))['per_check']
+    assert res['DCMA-12-CriticalPathTest']['counts']['status'] == 'NOT SCORED'
+    assert res['DCMA-13-CPLI']['counts']['status'] == 'NOT SCORED'
+    assert '#12 fails it' not in res['DCMA-13-CPLI']['message']

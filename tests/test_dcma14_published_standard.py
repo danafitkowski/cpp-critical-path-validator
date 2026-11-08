@@ -363,7 +363,10 @@ def test_blank_total_float_is_reported_not_assessed():
     tasks, preds = _chain()
     for t in tasks:
         t['total_float_hr_cnt'] = ''
-    result = dcma_14_assess(_schedule(tasks, preds), profile='commercial')
+    # A named deadline date gives #13 its float without P6's; with no named
+    # date the P6 float is needed and a blank one leaves #13 NOT SCORED.
+    result = dcma_14_assess(_schedule(tasks, preds, project_extra={'plan_end_date': ''}),
+                            profile='commercial')
     six = result['per_check']['DCMA-06-HighFloat']
     seven = result['per_check']['DCMA-07-NegFloat']
     thirteen = result['per_check']['DCMA-13-CPLI']
