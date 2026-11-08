@@ -56,5 +56,6 @@ Synthetic schedules (no client data) with the results `DCMA_DEFINITION.md` (besi
 | p19_calendar_mix | #13 with no baseline: a named deadline's float is working time on the project calendar, not the completion's own-calendar P6 float |
 | p20_cross_project_links | D4: a link to another project, by relationship or by P6's external date, counts for #1 |
 | p21_zero_duration | D1: a zero-duration activity is a milestone for the populations (#5, #8); #4 names a Start-to-Finish |
+| p22_mandatory_mid_path | #12, the 600-day test: a Mandatory Start part way along the driving path stops the delay (FAIL); p1, p2 and p10 pass it. A result marked `by: test` needs the recalculation; a view without one reads NOT SCORED |
 
 Working-day counts assume the fixtures' calendars, which carry no holidays except the one p11_short_day tests.

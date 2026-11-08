@@ -28,6 +28,12 @@ import dcma14  # noqa: E402
 from dcma14 import dcma_14_assess  # noqa: E402
 from xer_parser import parse_xer  # noqa: E402
 
+try:
+    import cpm  # noqa: F401,E402  (CPP's CPM engine, for #12's 600-day test)
+    HAVE_ENGINE = True
+except Exception:  # this repository does not ship it
+    HAVE_ENGINE = False
+
 FIXTURES = os.path.join(SCRIPT_DIR, 'fixtures', 'dcma_parity')
 DEFINITION_JSON = os.path.join(FIXTURES, 'dcma_definition.json')
 EXPECTED_JSON = os.path.join(FIXTURES, 'expected.json')
@@ -73,7 +79,12 @@ def test_parity(fixture, check):
     pc = _result(fixture)['per_check'][CHECK_IDS[check]]
     got = pc['counts']
     where = f'{fixture} #{check}: {pc["message"]}'
-    assert got['status'] == STATUS[want['status']], (got, where)
+    expect = want['status']
+    # A #12 result the 600-day test decides (by: 'test') needs CPP's CPM
+    # engine, which this repository does not ship; without it, NOT SCORED.
+    if want.get('by') == 'test' and not HAVE_ENGINE:
+        expect = 'NS'
+    assert got['status'] == STATUS[expect], (got, where)
     for key in ('num', 'den'):
         if key in want:
             assert got[key] == want[key], (key, got, want, where)

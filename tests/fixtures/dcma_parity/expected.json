@@ -52,7 +52,8 @@
     "status": "NS"
    },
    "12": {
-    "status": "NS"
+    "status": "PASS",
+    "by": "test"
    },
    "13": {
     "status": "NS"
@@ -99,7 +100,8 @@
     "den": 9
    },
    "12": {
-    "status": "NS"
+    "status": "PASS",
+    "by": "test"
    }
   }
  },
@@ -255,6 +257,10 @@
     "num": 1,
     "den": 1
    },
+   "12": {
+    "status": "PASS",
+    "by": "test"
+   },
    "13": {
     "status": "FAIL",
     "value": 0.5
@@ -398,6 +404,16 @@
     "status": "PASS",
     "num": 0,
     "den": 4
+   }
+  }
+ },
+ "p22_mandatory_mid_path": {
+  "current": "p22_mandatory_mid_path.xer",
+  "baseline": null,
+  "checks": {
+   "12": {
+    "status": "FAIL",
+    "by": "test"
    }
   }
  }

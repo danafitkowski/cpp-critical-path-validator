@@ -1504,7 +1504,7 @@ def _check_11_missed_tasks(work_tasks, baseline_tasks, data_date_dt, profile,
         **counts}
 
 
-def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None):
+def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None, cpt=None):
     """#12 Critical Path Test — the large-delay perturbation test.
 
     The test inserts a large delay (commonly 600 working days; that figure is
@@ -1580,6 +1580,11 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None):
             'No dated activity — the project finish could not be identified, so '
             'the Critical Path Test was NOT SCORED.'
         ), det
+    if not det.get('finish_complete') and _is_complete(finish_task):
+        return INFO, None, None, (
+            f'Critical Path Test NOT SCORED. The project finish activity {code} is '
+            f'complete, so there is no remaining network for an inserted delay to move.'
+        ), det
     if det.get('finish_complete'):
         return INFO, None, None, (
             f'Critical Path Test NOT SCORED. The project finish activity {code} is '
@@ -1597,6 +1602,22 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None):
             f'requires inserting a large delay, commonly 600 working days, and a '
             f'CPM recalculation, which this module does not perform.'
         ), det
+    # The test itself, where CPP's CPM engine is here to recalculate
+    # (critical_path_test.py). Its PASS or FAIL is the result; a NOT SCORED
+    # from it (no unfinished work drives the completion) says why.
+    if cpt and cpt.get('ran'):
+        det.update({k: cpt.get(k) for k in ('test_activity', 'delay_days', 'slip_days',
+                                            'finish_before', 'finish_after', 'driving_path')})
+        det['test_run'] = True
+        if cpt['status'] in ('PASS', 'FAIL'):
+            ok = cpt['status'] == 'PASS'
+            det['assessed'] = True
+            det['counts'] = _counts(STATUS_PASS if ok else STATUS_FAIL)
+            return (PASS if ok else BLOCK), None, None, cpt['message'], det
+        return INFO, None, None, cpt['message'], det
+    if cpt is not None:
+        det['test_run'] = False
+        det['test_not_run_reason'] = cpt.get('reason', '')
     if soft:
         labels = '/'.join(CONSTRAINT_TYPES.get(c, c) for c in soft)
         carries = (f'carries {"/".join(soft)} ({labels}), which P6 does not hold '
@@ -2432,8 +2453,19 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
              _check_11_missed_tasks(work_tasks, baseline_rows, data_date_dt, prof,
                                     ambiguous=ambiguous))
     cycles = _logic_cycles([t['task_id'] for t in work_tasks], logic_rels)
+    cpt = None
+    if not cycles:
+        _comp, _ = _completion_activity(work_tasks)
+        if _comp is not None and not _is_complete(_comp):
+            try:
+                import critical_path_test as _cpt_mod
+                cpt = _cpt_mod.run(data, target_pid, work_tasks, preds_for_project, task_map,
+                                   cal_map, _comp, _is_ordinary, _is_complete,
+                                   _working_days_between)
+            except Exception as exc:  # never let the test break the assessment
+                cpt = {'ran': False, 'reason': 'the test could not run (%s)' % exc.__class__.__name__}
     _run('DCMA-12-CriticalPathTest', 'Critical Path Test', 'DCMA 14-Point #12',
-         _check_12_critical_path_test(work_tasks, logic_pred_map, prof, cycles=cycles))
+         _check_12_critical_path_test(work_tasks, logic_pred_map, prof, cycles=cycles, cpt=cpt))
     if baseline_unusable:
         _run('DCMA-13-CPLI', 'Critical Path Length Index', 'DCMA 14-Point #13',
              _no_usable_baseline('CPLI', prof['dcma_cpli_min'], cpli=None))
