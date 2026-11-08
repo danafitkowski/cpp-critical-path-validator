@@ -74,9 +74,15 @@ exact counts, never on a rounded percentage. Per check:
   working days added to the unfinished activity on the completion's driving path nearest
   the data date whose finish drives that path, and #12 passes only when the completion
   moves by the delay; a failure names the activity where the delay is lost and what holds
-  it. The test is not run on a network of more than 5,000 activities, or past 20 seconds
-  for the run as filed and 60 for the whole test (above 500 activities each recalculation
-  runs in a separate process that is stopped at the limit). This repository's
+  it. A test activity whose finish a constraint holds fails there. A smaller move passes
+  only when every activity after the test activity on the as-filed path moved later, none
+  had its finish set by an expected finish, the completion is still driven back through
+  it, and the path crosses another calendar or carries a lag (the result then says the
+  calendars or lags set the amount). The test is not run on a network of more than 5,000
+  activities, or past 20 seconds for the run as filed and 60 for the whole test (above
+  100 activities each recalculation runs in a separate process that is stopped at the
+  limit), nor where #12 is already decided (a pinned completion, or one with no
+  predecessor). This repository's
   `cp_validator` does not build that network, so here the test is not run, even with
   the public engine beside it: the result says so, and #12 is decided only in the
   certain cases above. On a finished completion the pin decides

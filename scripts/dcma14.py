@@ -1596,11 +1596,9 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None, cpt
         det['no_predecessor'] = True
         return INFO, None, None, (
             f'Critical Path Test NOT SCORED. The project finish activity {code} '
-            f'has no predecessor; that is reported under #1 Logic. An unlinked '
-            f'finish does not by itself show that a delay inserted on the '
-            f'critical path would not move completion; confirming the test '
-            f'requires inserting a large delay, commonly 600 working days, and a '
-            f'CPM recalculation, which this module does not perform.'
+            f'has no predecessor; that is reported under #1 Logic. No work '
+            f'drives it, so there is no critical path on which to insert the '
+            f'delay (commonly 600 working days); the test is not run.'
         ), det
     # The test itself, where CPP's CPM engine is here to recalculate
     # (critical_path_test.py). Its PASS or FAIL is the result; a NOT SCORED
@@ -2456,7 +2454,14 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
     cpt = None
     if not cycles:
         _comp, _ = _completion_activity(work_tasks)
-        if _comp is not None and not _is_complete(_comp):
+        # Not run where #12 is decided without it: a completion pinned by a
+        # Mandatory Start or Finish fails, one with no predecessor is not
+        # scored (Claude AI review of the test, 8-Nov-26: both recalculations
+        # ran, up to 60 seconds, on exactly those schedules).
+        _pinned = _comp is not None and any(
+            (_comp.get(k) or '').strip() in DCMA_MANDATORY_CONSTRAINTS for k in ('cstr_type', 'cstr_type2'))
+        if (_comp is not None and not _is_complete(_comp) and not _pinned
+                and logic_pred_map.get(_comp['task_id'])):
             try:
                 import critical_path_test as _cpt_mod
                 cpt = _cpt_mod.run(data, target_pid, work_tasks, preds_for_project, task_map,
