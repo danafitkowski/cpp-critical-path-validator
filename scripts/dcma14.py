@@ -488,30 +488,37 @@ def _readable_hours(v):
 
 
 def _completion_tie_rank(t, with_successor=None):
-    """D11 tie order: the end of the network (no logic relationship leads from
-    it; read only when ``with_successor``, the ids that have one, is given),
-    then a finish milestone, then an activity of zero original duration (a
-    completion typed as a task), then anything else."""
+    """D11 tie order: an unfinished activity, then the end of the network (no
+    logic relationship to an unfinished successor leads from it; read only when
+    ``with_successor``, the ids that have one, is given), then a finish
+    milestone, then an activity of zero original duration (a completion typed
+    as a task), then anything else."""
+    live = 0 if _is_complete(t) else 1
     end = 1 if with_successor is not None and t.get('task_id', '') not in with_successor else 0
     if t.get('task_type', '') == 'TT_FinMile':
-        return (end, 2)
+        return (live, end, 2)
     raw = str(t.get('target_drtn_hr_cnt', '') or '').strip()
     try:
-        return (end, 1 if raw and float(raw) == 0 else 0)
+        return (live, end, 1 if raw and float(raw) == 0 else 0)
     except (TypeError, ValueError):
-        return (end, 0)
+        return (live, end, 0)
 
 
-def _with_successor(rels):
-    """The ids a logic relationship leads from (D4: ``rels`` is the scored
-    project's logic relationships, both ends ordinary or milestone)."""
-    return {r.get('pred_task_id', '') for r in rels or ()}
+def _with_successor(rels, by_id=None):
+    """The ids a logic relationship to an UNFINISHED successor leads from (D4:
+    ``rels`` is the project's logic relationships, both ends ordinary or
+    milestone; ``by_id`` its activities by id). A finished out-of-sequence
+    successor does not stop an activity being the end of the network (Claude
+    AI review of the tie, 8-Nov-26)."""
+    by_id = by_id or {}
+    return {r.get('pred_task_id', '') for r in rels or ()
+            if not _is_complete(by_id.get(r.get('task_id', ''), {}))}
 
 
 def _project_finish_task(work_tasks, finish_fn, with_successor=None):
-    """(activity, instant) with the latest finish. On a tie: the end of the
-    network (an activity no logic relationship leads from), then a finish
-    milestone, then an activity of zero original duration, else the first in
+    """(activity, instant) with the latest finish. On a tie: an unfinished
+    activity, then the end of the network (no logic relationship to an
+    unfinished successor leads from it), then a finish milestone, then an activity of zero original duration, else the first in
     the file (D11; the zero-duration step added 2026-11-07, the written
     definition; the end of the network 2026-11-08: two finish milestones on one
     instant, the first in the file feeding the second, and file order took the
@@ -544,16 +551,40 @@ def _baseline_with_successor(baseline_data, baseline_rows):
     None without a baseline."""
     if not baseline_rows:
         return None
-    ids = {t.get('task_id', '') for t in baseline_rows if _is_work_task(t)}
+    by_id = {t.get('task_id', ''): t for t in baseline_rows if _is_work_task(t)}
     rels = ((baseline_data or {}).get('tables', {}).get('TASKPRED', {}) or {}).get('records') or []
-    return _with_successor(r for r in rels
-                           if r.get('task_id', '') in ids and r.get('pred_task_id', '') in ids)
+    return _with_successor([r for r in rels
+                            if r.get('task_id', '') in by_id and r.get('pred_task_id', '') in by_id], by_id)
+
+
+def _tied_with(finish_task, work_tasks, finish_dt, logic_rels):
+    """The completion and every activity that finishes with it at ``finish_dt``
+    and is joined to it by a logic relationship, directly or through other such
+    activities (#13's deadline). Without relationships, the completion alone."""
+    tied = {t.get('task_id', ''): t for t in work_tasks
+            if _is_work_task(t) and _early_or_planned_finish(t) == finish_dt}
+    start = finish_task.get('task_id', '')
+    tied[start] = finish_task
+    links = {}
+    for r in logic_rels or ():
+        a, b = r.get('pred_task_id', ''), r.get('task_id', '')
+        if a in tied and b in tied:
+            links.setdefault(a, set()).add(b)
+            links.setdefault(b, set()).add(a)
+    seen, stack = {start}, [start]
+    while stack:
+        for nxt in links.get(stack.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return [finish_task] + [t for tid, t in tied.items() if tid in seen and tid != start]
 
 
 def _completion_activity(work_tasks, with_successor=None):
     """D11: the ordinary or milestone activity, complete or not, with the
-    latest early finish (else planned finish). On a tie: the end of the network
-    (no logic relationship leads from it; ``with_successor`` is the set of ids
+    latest early finish (else planned finish). On a tie: an unfinished
+    activity, then the end of the network (no logic relationship to an
+    unfinished successor leads from it; ``with_successor`` is the set of ids
     one does), then a finish milestone, then an activity of zero original
     duration, else the first in the file. Used by #12 and #13."""
     return _project_finish_task(
@@ -1567,9 +1598,9 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None, cpt
         return INFO, None, None, (
             'No work tasks — Critical Path Test NOT SCORED.'
         ), {'assessed': False, 'logic_cycles': [], 'counts': _ns_counts()}
-    finish_task, finish_dt = _completion_activity(
-        work_tasks, _with_successor(r for rels in (pred_map or {}).values() for r in rels))
     by_id = {t['task_id']: t for t in work_tasks}
+    finish_task, finish_dt = _completion_activity(
+        work_tasks, _with_successor([r for rels in (pred_map or {}).values() for r in rels], by_id))
     cycle_codes = [[_code(by_id[i]) if i in by_id else i for i in c] for c in cycles]
     det = {'logic_cycles': cycle_codes, 'assessed': True}
     reasons = []
@@ -1666,7 +1697,8 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None, cpt
 
 
 def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
-                   baseline_tasks=None, with_successor=None, baseline_with_successor=None):
+                   baseline_tasks=None, with_successor=None, baseline_with_successor=None,
+                   logic_rels=None):
     """#13 Critical Path Length Index.
 
     CPLI = (CP length + float) / CP length, read on the completion activity
@@ -1688,7 +1720,8 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
           – without a baseline, when the file NAMES a deadline (P6's Must
             Finish By, PROJECT.plan_end_date, or the date of a Finish On /
             Finish On or Before on the completion activity or on an activity
-            tied with it at the latest finish; the earliest when several):
+            tied with it at the latest finish and joined to it by logic; the
+            earliest when several):
             the working time from the forecast finish to that date
             on the project calendar, measured as the baseline case is. No
             exported float is needed.
@@ -1801,11 +1834,12 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
     # No baseline: the P6 float of the finish activity means something only
     # against a deadline in the file.
     must_finish_by = str((project or {}).get('plan_end_date', '') or '').strip()
-    # The deadline may sit on any activity that finishes with the completion at
-    # the project's finish (the D11 tie), not only on the one D11 takes: two
-    # milestones on one instant, one feeding the other, carry it on either.
-    tied = [finish_task] + [t for t in work_tasks if t is not finish_task and _is_work_task(t)
-                            and _early_or_planned_finish(t) == latest_ef] if finish_task else []
+    # The deadline may sit on an activity that finishes with the completion at
+    # the project's finish (the D11 tie) and is joined to it by logic, directly
+    # or through other tied activities: two milestones on one instant, one
+    # feeding the other, carry it on either. A parallel milestone that only
+    # happens to finish then is not the project's end (Claude AI review, 8-Nov-26).
+    tied = _tied_with(finish_task, work_tasks, latest_ef, logic_rels) if finish_task else []
     fin_cstrs = [t.get(k, '') for t in tied for k in ('cstr_type', 'cstr_type2')
                  if t.get(k, '') in CPLI_DEADLINE_CONSTRAINTS]
     tf_hrs = _float_hours(finish_task) if finish_task else None
@@ -2509,7 +2543,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
     cycles = _logic_cycles([t['task_id'] for t in work_tasks], logic_rels)
     cpt = None
     if not cycles:
-        _comp, _ = _completion_activity(work_tasks, _with_successor(logic_rels))
+        _comp, _ = _completion_activity(work_tasks, _with_successor(logic_rels, task_map))
         # Not run where #12 is decided without it: a completion pinned by a
         # Mandatory Start or Finish fails, one with no predecessor is not
         # scored (review of 8-Nov-26: both recalculations
@@ -2533,8 +2567,9 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
     else:
         _run('DCMA-13-CPLI', 'Critical Path Length Index', 'DCMA 14-Point #13',
              _check_13_cpli(work_tasks, cal_map, data_date_dt, prof, project,
-                            baseline_tasks=baseline_rows, with_successor=_with_successor(logic_rels),
-                            baseline_with_successor=_baseline_with_successor(baseline_data, baseline_rows)))
+                            baseline_tasks=baseline_rows, with_successor=_with_successor(logic_rels, task_map),
+                            baseline_with_successor=_baseline_with_successor(baseline_data, baseline_rows),
+                            logic_rels=logic_rels))
     if baseline_unusable:
         _run('DCMA-14-BEI', 'Baseline Execution Index', 'DCMA 14-Point #14',
              _no_usable_baseline('BEI', prof['bei_min'], bei=None))

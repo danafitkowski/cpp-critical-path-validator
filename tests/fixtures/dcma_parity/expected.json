@@ -458,5 +458,23 @@
     "value": 0.5
    }
   }
+ },
+ "p27_finished_successor": {
+  "current": "p27_finished_successor.xer",
+  "baseline": null,
+  "checks": {
+   "12": {
+    "status": "FAIL"
+   }
+  }
+ },
+ "p28_parallel_deadline": {
+  "current": "p28_parallel_deadline.xer",
+  "baseline": null,
+  "checks": {
+   "13": {
+    "status": "NS"
+   }
+  }
  }
 }

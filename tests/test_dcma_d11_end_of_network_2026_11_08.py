@@ -82,3 +82,28 @@ def test_13_reads_the_deadline_on_an_activity_tied_with_the_completion():
     pc = dcma_14_assess(data)['per_check']['DCMA-13-CPLI']
     assert pc['counts']['status'] == 'FAIL' and abs(pc['value'] - 0.5) < 1e-9, pc['message']
     assert 'on E1' in pc['message'] and 'of F' in pc['message'], pc['message']
+
+
+# The review of the tie (Claude AI, 8-Nov-26).
+def test_a_finished_out_of_sequence_successor_does_not_end_the_claim():
+    from dcma14 import _with_successor
+    f = _t('1', 'F', '2029-06-13 16:00')
+    d = _t('2', 'D', '2029-06-13 16:00', task_type='TT_Task', dur='40')
+    h = dict(_t('3', 'H', '2029-01-01 16:00', task_type='TT_Task', dur='8'), status_code='TK_Complete')
+    by_id = {x['task_id']: x for x in (f, d, h)}
+    leads = _with_successor([{'pred_task_id': '1', 'task_id': '3'}], by_id)
+    assert leads == set()
+    assert _completion_activity([d, f], leads)[0]['task_code'] == 'F'
+
+
+def test_an_unfinished_tied_activity_comes_before_a_finished_one():
+    done = dict(_t('1', 'C', '2029-06-13 16:00', task_type='TT_Task', dur='8'), status_code='TK_Complete')
+    mile = _t('2', 'M', '2029-06-13 16:00')
+    assert _completion_activity([done, mile], {'2'})[0]['task_code'] == 'M'
+
+
+def test_13_does_not_read_a_deadline_on_a_parallel_tied_milestone():
+    data = parse_xer(os.path.join(FX, 'p28_parallel_deadline.xer'))
+    pc = dcma_14_assess(data)['per_check']['DCMA-13-CPLI']
+    assert pc['counts']['status'] == 'NOT SCORED', pc['message']
+    assert 'on M' not in pc['message'], pc['message']

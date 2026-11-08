@@ -61,5 +61,7 @@ Synthetic schedules (no client data) with the results `references/DCMA_DEFINITIO
 | p24_start_link_mandatory | #12: as p23 with a Mandatory Start on that activity's own start; its start cannot take the delay (FAIL) |
 | p25_tied_completion | D11, #12, #13: two finish milestones finish on one instant and the first leads to the second; the completion is the end of the network (the second), which a Mandatory Finish pins: #12 FAIL without a recalculation, #13 NOT SCORED |
 | p26_tied_deadline | #13, D11: as p10, but the deadline (Finish On or Before) sits on the milestone that feeds the completion on the same instant; #13 reads it from the tie: CPLI 0.5 (FAIL) |
+| p27_finished_successor | D11, #12: a pinned finish milestone whose only successor finished out of sequence ties with an unlinked task; a link to finished work does not end its claim, so it is the completion and #12 FAILS on its pin |
+| p28_parallel_deadline | #13: a parallel interim milestone with a deadline ties with the completion but no relationship joins them; it is not the project's deadline, and with zero float #13 is NOT SCORED |
 
 Working-day counts assume the fixtures' calendars, which carry no holidays except the one p11_short_day tests.

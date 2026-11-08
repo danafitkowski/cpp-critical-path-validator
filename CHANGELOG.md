@@ -9,18 +9,21 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 ### Changed
 
 - **DCMA-14 #12 and #13: on a tie, the completion activity is the end of the network** (CPP's
-  written definition, D11). Where several activities share the latest finish, the one no
-  logic relationship leads from comes first, then a finish milestone, then an activity of
-  zero original duration, else the first in the file. Two finish milestones on one instant,
+  written definition, D11). Where several activities share the latest finish, an unfinished
+  one comes first, then the one no logic relationship to an unfinished successor leads from
+  (a link to finished out-of-sequence work does not count), then a finish milestone, then an
+  activity of zero original duration, else the first in the file. Two finish milestones on one instant,
   the first in the file feeding the second, used to be read at the first, so #12 tested the
   path into a milestone that is not the project's end. A baseline's own completion activity
   (#13) is chosen on the baseline's own relationships. New shared fixture
   `p25_tied_completion`.
 - **DCMA-14 #13: the deadline may sit on any activity tied with the completion.** Without a
   baseline, a Finish On or Finish On or Before on an activity that finishes with the
-  completion at the project's finish is the project's deadline (the earliest when several),
+  completion at the project's finish and is joined to it by logic relationships (directly or
+  through other such activities) is the project's deadline (the earliest when several); a
+  parallel milestone that only finishes at the same instant is not,
   so which tied activity D11 takes no longer decides whether the deadline is read. New shared
-  fixture `p26_tied_deadline`.
+  fixtures `p26_tied_deadline`, `p27_finished_successor` and `p28_parallel_deadline`.
 
 ## v0.8.0 — 2026-11-08
 
