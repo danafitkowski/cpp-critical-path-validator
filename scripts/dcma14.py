@@ -362,7 +362,19 @@ def _is_work_task(t):
 
 
 def _is_milestone(t):
-    return t.get('task_type', '') in DCMA_MILESTONE_TYPES
+    """D1: a milestone type, or an activity whose original duration is zero:
+    it carries no work, and the DCMA pamphlet's populations leave out
+    zero-duration tasks as milestones. A blank duration is not zero (#8 leaves
+    it out on its own rule)."""
+    if t.get('task_type', '') in DCMA_MILESTONE_TYPES:
+        return True
+    if not _is_work_task(t):
+        return False
+    raw = str(t.get('target_drtn_hr_cnt', '') or '').strip()
+    try:
+        return bool(raw) and float(raw) == 0.0
+    except (TypeError, ValueError):
+        return False
 
 
 def _is_ordinary(t):
@@ -693,7 +705,8 @@ def _logic_cycles(work_ids, logic_rels):
 # lifts to per_check[id]['counts'].
 # ─────────────────────────────────────────────────────────────────────
 
-def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile):
+def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile,
+                    ext_pred=frozenset(), ext_succ=frozenset()):
     """#1 Logic — incomplete ordinary activities and incomplete milestones
     with no logic relationship in (missing predecessor) or out (missing
     successor), each counted once; at most 5%.
@@ -728,7 +741,7 @@ def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile):
             'Logic NOT SCORED: the schedule has no incomplete work tasks, so '
             'there is no remaining logic to measure.'
         ), {
-            'missing_count': 0, 'denominator': 0,
+            'missing_count': 0, 'denominator': 0, 'external_link_only': [],
             'missing_pred_count': 0, 'missing_pred_pct': 0.0,
             'missing_succ_count': 0, 'missing_succ_pct': 0.0,
             'missing_pred': [], 'missing_succ': [],
@@ -743,12 +756,18 @@ def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile):
     net_finish = max(finishes) if finishes else None
 
     missing_pred, missing_succ = [], []
+    external_only = set()
     for t in incomplete:
         tid = t['task_id']
         ttype = t.get('task_type', '')
         code = t.get('task_code', tid)
-        has_pred = bool(pred_map.get(tid))
-        has_succ = bool(succ_map.get(tid))
+        # D4: a link to another project is logic for #1 (P6 schedules it), so
+        # an activity whose only predecessor or successor is in another project
+        # is not an open end.
+        has_pred = bool(pred_map.get(tid)) or tid in ext_pred
+        has_succ = bool(succ_map.get(tid)) or tid in ext_succ
+        if not pred_map.get(tid) and tid in ext_pred or not succ_map.get(tid) and tid in ext_succ:
+            external_only.add(code)
         ts, tf = _task_start(t), _task_finish(t)
         pred_exempt = (ttype == 'TT_Mile' and net_start is not None
                        and ts is not None and ts <= net_start)
@@ -771,8 +790,12 @@ def _check_01_logic(work_tasks, incomplete, pred_map, succ_map, profile):
         f'({pct_pred:.1f}%), {len(missing_succ)} missing a successor '
         f'({pct_succ:.1f}%) (threshold ≤ {threshold}%). A relationship to a '
         f'level of effort or WBS summary is not logic.'
+        + (f' {len(external_only)} activit{"y is" if len(external_only) == 1 else "ies are"} '
+           f'linked only to another project on one side; that link counts.'
+           if external_only else '')
     # Full lists — never truncate. CPP forensic-correctness rule.
     ), {'missing_count': len(missing), 'denominator': denom,
+        'external_link_only': sorted(external_only),
         'missing_pred_count': len(missing_pred), 'missing_pred_pct': pct_pred,
         'missing_succ_count': len(missing_succ), 'missing_succ_pct': pct_succ,
         'missing_pred': list(missing_pred), 'missing_succ': list(missing_succ),
@@ -862,11 +885,16 @@ def _check_04_relationship_types(preds_all, profile, task_map=None):
     non_fs = [f"{_rel_label(p, task_map or {})} ({p.get('pred_type', '')})"
               for p in preds_all if p.get('pred_type', '') != 'PR_FS']
     pct = fs / len(preds_all) * 100.0
+    sf = sum(1 for p in preds_all if p.get('pred_type', '') == 'PR_SF')
     ok = _at_least_pct(fs, len(preds_all), threshold)
     sev = PASS if ok else WARN
     return sev, pct, threshold, (
         f'{fs} of {len(preds_all)} live relationships ({pct:.1f}%) are FS '
         f'(threshold ≥ {threshold}%).'
+        # The pamphlet says Start-to-Finish should not be used at all: the
+        # count is given for information.
+        + (f' {sf} {"is" if sf == 1 else "are"} Start-to-Finish, which DCMA says should not be used.'
+           if sf else '')
     # Full list — never truncate. CPP forensic-correctness rule.
     ), {'fs_count': fs, 'live_count': len(preds_all), 'assessed': True,
         'non_fs': non_fs,
@@ -1732,18 +1760,38 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
         return _ns('CPLI NOT SCORED: the project finish activity carries no '
                    'computed total float — CPLI not computable. Recalculate the '
                    'schedule in P6 and re-export.', cp_length_days=cp_length_days)
+    # A NAMED deadline date (Must Finish By, or the date of a Finish On / Finish
+    # On or Before on the completion; the earliest when several): the float is
+    # the working time from the forecast finish to that date on the project
+    # calendar, as the baseline case measures it, so both terms of CPLI are in
+    # the same working days.
+    named = []
+    date_must_finish = _parse_date(must_finish_by) if must_finish_by else None
+    if date_must_finish is not None:
+        named.append((date_must_finish, f'Must Finish By {date_must_finish.date()}'))
+    for ctype, cfield in (('cstr_type', 'cstr_date'), ('cstr_type2', 'cstr_date2')):
+        if (finish_task or {}).get(ctype, '') in CPLI_DEADLINE_CONSTRAINTS:
+            date_constraint = _parse_date((finish_task or {}).get(cfield, ''))
+            if date_constraint is not None:
+                named.append((date_constraint, f'the {finish_task.get(ctype)} date '
+                              f'{date_constraint.date()} on {fin_code}'))
+    if named:
+        date_deadline, label = min(named, key=lambda x: x[0])
+        tf_days = _working_days_between(latest_ef, date_deadline, cp_cal)
+        if tf_days is None:
+            return _ns('CPLI NOT SCORED: the working time between the forecast '
+                       'finish and the deadline could not be counted.',
+                       cp_length_days=cp_length_days, finish_activity=fin_code)
+        return _graded(tf_days, 'deadline_working_time', (
+            f'float to the deadline ({label}) = {tf_days:+.1f}d, the working time '
+            f'on the project calendar (no baseline).'),
+            deadline=str(date_deadline))
     tf_days = _hrs_to_days(tf_hrs, cal_map, (finish_task or {}).get('clndr_id', ''))
-    if must_finish_by:
-        date_must_finish = str(must_finish_by)
-        deadline = f'Must Finish By {date_must_finish[:10]}'
-    elif fin_cstrs:
-        deadline = f'the {"/".join(fin_cstrs)} constraint on {fin_code}'
-    else:
-        deadline = ('the date P6 measured it against (the file names no Must '
-                    'Finish By or finish constraint, but the float is not zero)')
+    deadline = ('the date P6 measured it against (the file names no Must '
+                'Finish By or finish constraint date, but the float is not zero)')
     return _graded(tf_days, 'p6_float_to_deadline', (
         f'total float of the project finish activity {fin_code} = {tf_days:.1f}d '
-        f'(no baseline; the P6 float is read against {deadline}).'))
+        f'(no baseline; the P6 float, on its own calendar, is read against {deadline}).'))
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -2240,6 +2288,27 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
                   if _is_work_task(task_map[p['task_id']])
                   and _is_work_task(task_map[p['pred_task_id']])]
     live_rels = [p for p in logic_rels if not _is_complete(task_map[p['task_id']])]
+    # D4: links to another project (one end outside the scored project, the
+    # other end not a level of effort or WBS summary where the file holds it;
+    # or P6's external dates on the activity). Logic for #1 only: not graded
+    # by #2 to #4, which judge this project's own relationships.
+    by_id_all = {t.get('task_id', ''): t for t in tasks_all}
+    ext_pred, ext_succ = set(), set()
+    for p in preds_all:
+        sid, pid = p.get('task_id', ''), p.get('pred_task_id', '')
+        if sid in task_map and pid not in task_map:
+            other = by_id_all.get(pid)
+            if other is None or _is_work_task(other):
+                ext_pred.add(sid)
+        elif pid in task_map and sid not in task_map:
+            other = by_id_all.get(sid)
+            if other is None or _is_work_task(other):
+                ext_succ.add(pid)
+    for t in tasks:
+        if str(t.get('external_early_start_date', '') or '').strip():
+            ext_pred.add(t.get('task_id', ''))
+        if str(t.get('external_late_end_date', '') or '').strip():
+            ext_succ.add(t.get('task_id', ''))
     logic_pred_map, logic_succ_map = {}, {}
     for p in logic_rels:
         logic_pred_map.setdefault(p['task_id'], []).append(p)
@@ -2328,7 +2397,8 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
                  'counts': _ns_counts()}, **extra)
 
     _run('DCMA-01-Logic', 'Logic', 'DCMA 14-Point #1',
-         _check_01_logic(work_tasks, incomplete, logic_pred_map, logic_succ_map, prof))
+         _check_01_logic(work_tasks, incomplete, logic_pred_map, logic_succ_map, prof,
+                         ext_pred=ext_pred, ext_succ=ext_succ))
     _run('DCMA-02-Leads', 'Leads', 'DCMA 14-Point #2',
          _check_02_leads(live_rels, prof, task_map))
     _run('DCMA-03-Lags', 'Lags', 'DCMA 14-Point #3',
@@ -2341,8 +2411,14 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
          _check_06_high_float(incomplete, cal_map, prof))
     _run('DCMA-07-NegFloat', 'Negative Float', 'DCMA 14-Point #7',
          _check_07_negative_float(incomplete, cal_map, prof))
-    _run('DCMA-08-HighDuration', 'High Duration', 'DCMA 14-Point #8',
-         _check_08_high_duration(incomplete, cal_map, prof, baseline_basis=baseline_basis))
+    _r8 = _check_08_high_duration(incomplete, cal_map, prof, baseline_basis=baseline_basis)
+    if baseline_unusable and _r8[1] is not None:
+        # D9: a supplied baseline that is not used reads current durations;
+        # the result says why.
+        _r8 = (_r8[0], _r8[1], _r8[2],
+               _r8[3] + f' A baseline was supplied but not used ({baseline_match}), so '
+                        f'every duration is the current one.', _r8[4])
+    _run('DCMA-08-HighDuration', 'High Duration', 'DCMA 14-Point #8', _r8)
     _run('DCMA-09-InvalidDates', 'Invalid Dates', 'DCMA 14-Point #9',
          _check_09_invalid_dates(work_tasks, data_date_dt, prof, correction=ddc_record))
     _run('DCMA-10-Resources', 'Resources', 'DCMA 14-Point #10',

@@ -142,7 +142,10 @@ def test_cpli_is_not_dominated_by_the_deepest_negative_activity():
     for t in tasks:
         if t['task_code'] == 'A20':
             t['total_float_hr_cnt'] = '-800'
-    result = dcma_14_assess(_schedule(tasks, preds), profile='commercial')
+    # 2026-11-07: no Must Finish By, so the finish activity's own P6 float is
+    # read (a named deadline is now read as working time to its date).
+    result = dcma_14_assess(_schedule(tasks, preds, project_extra={'plan_end_date': ''}),
+                            profile='commercial')
     cpli = result['cpli']
     assert cpli > 0, f'CPLI must never be negative; got {cpli}'
     assert abs(cpli - (10.0 / 11.0)) < 0.005, f'expected CPLI≈0.909, got {cpli}'
@@ -541,9 +544,11 @@ def test_lock_cpli_commercial_floor_is_095():
     assert nuc['per_check']['DCMA-13-CPLI']['threshold'] == 0.98
 
     # CPLI 0.977 — inside the band where the two profiles must disagree.
+    # 2026-11-07: no Must Finish By, so the finish activity's P6 float is read.
     tasks, preds = _chain(finish_tf='-2', mid_tf='-2')
-    com = dcma_14_assess(_schedule(tasks, preds), profile='commercial')['per_check']['DCMA-13-CPLI']
-    nuc = dcma_14_assess(_schedule(tasks, preds), profile='nuclear')['per_check']['DCMA-13-CPLI']
+    nodate = {'plan_end_date': ''}
+    com = dcma_14_assess(_schedule(tasks, preds, project_extra=nodate), profile='commercial')['per_check']['DCMA-13-CPLI']
+    nuc = dcma_14_assess(_schedule(tasks, preds, project_extra=nodate), profile='nuclear')['per_check']['DCMA-13-CPLI']
     assert 0.95 < com['value'] < 0.98, (
         f'fixture no longer lands between the two floors; got {com["value"]}')
     assert com['severity'] == 'PASS', (

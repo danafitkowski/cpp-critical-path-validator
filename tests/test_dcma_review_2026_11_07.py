@@ -272,10 +272,14 @@ def test_13_no_baseline_no_deadline_but_negative_float_uses_p6_float():
     assert 'float is not zero' in pc['message']
 
 
-def test_13_no_baseline_with_must_finish_by_uses_p6_float():
+def test_13_no_baseline_must_finish_by_is_read_as_working_time():
+    # A named deadline is read as the working time from the forecast finish to
+    # its date on the project calendar, the unit of the critical path length.
+    # Must Finish By five working days before the finish -> float -5 -> 6/11.
     tasks, preds = _chain(finish_tf='-40', mid_tf='-40')
-    check = dcma_14_assess(_schedule(tasks, preds))['per_check']['DCMA-13-CPLI']
-    assert check['details']['basis'] == 'p6_float_to_deadline', check['details']
+    check = dcma_14_assess(_schedule(tasks, preds, project_extra={'plan_end_date': '2026-05-01 16:00'})
+                           )['per_check']['DCMA-13-CPLI']
+    assert check['details']['basis'] == 'deadline_working_time', check['details']
     assert abs(check['value'] - 6.0 / 11.0) < 1e-9, check
 
 

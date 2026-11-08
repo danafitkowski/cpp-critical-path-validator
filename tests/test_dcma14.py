@@ -405,7 +405,12 @@ def test_dcma_14_cpli_computation():
     # activity. It used to be `tf_days_min`, the minimum float across the whole
     # critical set, which capped CPLI at 1.0 by construction and printed
     # negative values when one deeply negative activity dominated the minimum.
+    # 2026-11-07 (second reviews): with no baseline, a named deadline is read
+    # as the working time from the forecast finish to its date, so the Must
+    # Finish By here agrees with the float, as P6 writes them (the completion
+    # A30 finishes at the end of 8 May; 15 May would be 5 days of float).
     data = _clean_schedule()
+    data['tables']['PROJECT']['records'][0]['plan_end_date'] = '2026-05-08 16:00'
     result = dcma_14_assess(data, profile='commercial')
     cpli = result['cpli']
     det = result['per_check']['DCMA-13-CPLI']['details']
@@ -422,6 +427,7 @@ def test_dcma_14_cpli_computation():
     # CPLI = (11 + (-5)) / 11 = 6/11 ≈ 0.545. This DEPENDS on the CP length, so a
     # mis-computed length changes it — the TF=0 case could not detect that.
     behind = _clean_schedule()
+    behind['tables']['PROJECT']['records'][0]['plan_end_date'] = '2026-05-01 16:00'   # 5 days before the finish
     for r in behind['tables']['TASK']['records']:
         r['total_float_hr_cnt'] = '-40'
     result2 = dcma_14_assess(behind, profile='commercial')

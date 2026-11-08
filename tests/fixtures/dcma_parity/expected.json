@@ -336,5 +336,69 @@
     "status": "NS"
    }
   }
+ },
+ "p17_shift_hours": {
+  "current": "p17_shift_hours.xer",
+  "baseline": null,
+  "checks": {
+   "8": {
+    "status": "PASS",
+    "num": 0,
+    "den": 2
+   }
+  }
+ },
+ "p18_empty_calendar": {
+  "current": "p18_empty_calendar.xer",
+  "baseline": null,
+  "checks": {
+   "8": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 2
+   }
+  }
+ },
+ "p19_calendar_mix": {
+  "current": "p19_calendar_mix.xer",
+  "baseline": null,
+  "checks": {
+   "13": {
+    "status": "FAIL",
+    "value": 0.5
+   }
+  }
+ },
+ "p20_cross_project_links": {
+  "current": "p20_cross_project_links.xer",
+  "baseline": null,
+  "checks": {
+   "1": {
+    "status": "FAIL",
+    "num": 1,
+    "den": 5
+   }
+  }
+ },
+ "p21_zero_duration": {
+  "current": "p21_zero_duration.xer",
+  "baseline": null,
+  "checks": {
+   "4": {
+    "status": "PASS",
+    "num": 9,
+    "den": 10
+   },
+   "5": {
+    "status": "PASS",
+    "num": 0,
+    "den": 4
+   },
+   "8": {
+    "status": "PASS",
+    "num": 0,
+    "den": 4
+   }
+  }
  }
 }

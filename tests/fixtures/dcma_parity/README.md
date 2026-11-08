@@ -44,12 +44,17 @@ Synthetic schedules (no client data) with the results `DCMA_DEFINITION.md` (besi
 | p7_as_built | every incomplete-work check not scored; #9 still scored on actuals |
 | p8_no_links | #1 with no relationships; #2 to #4 not scored |
 | p9_data_date | D14: a blank data date is the planned start (#9 scored against it); D0: a single-project file is read whole, an activity with a stray project ID included |
-| p10_late_no_baseline | #13 with no baseline: a deadline on the completion makes its negative P6 float count (CPLI 0.5, FAIL) |
+| p10_late_no_baseline | #13 with no baseline: a deadline on the completion is measured as working time to its date (CPLI 0.5, FAIL) |
 | p11_short_day | #13 working time (D13) on a short Monday and a holiday |
 | p12_exact_095 | a CPLI of exactly 0.95 passes (D7) |
 | p13_current + p13_baseline | a baseline sharing no Activity ID is not used (D9): #11, #13, #14 not scored, #8 on current durations |
 | p14_current + p14_baseline | #8: a blank duration left out; a baseline activity's duration on its own inherited calendar; a blank baseline duration reads the current one |
 | p15_no_forecasts | #9: an actual after the data date fails even when the incomplete work carries no forecasts |
 | p16_as_built_mandatory | #12: a finished completion's Mandatory Finish decides nothing (not scored, no cycle) |
+| p17_shift_hours | D3: a calendar whose shifts work 10 h a day but declares 8 converts on the 10 |
+| p18_empty_calendar | D3: a calendar record with no shift data is P6's 8-hour Standard, whatever it declares |
+| p19_calendar_mix | #13 with no baseline: a named deadline's float is working time on the project calendar, not the completion's own-calendar P6 float |
+| p20_cross_project_links | D4: a link to another project, by relationship or by P6's external date, counts for #1 |
+| p21_zero_duration | D1: a zero-duration activity is a milestone for the populations (#5, #8); #4 names a Start-to-Finish |
 
 Working-day counts assume the fixtures' calendars, which carry no holidays except the one p11_short_day tests.

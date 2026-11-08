@@ -18,6 +18,13 @@ Most schedules move on several checks, from the old reading to the definition's.
 
 ### Changed
 
+- **Zero-duration activities are milestones** for the check populations, as the DCMA
+  pamphlet reads them: an ordinary activity with an original duration of zero carries no
+  work, so #5, #6, #7, #8, #10, #11 and #14 leave it out (#5 lists a constrained one for
+  information). A blank duration is not zero.
+- **#4** names any Start-to-Finish relationship for information (DCMA says it should not
+  be used). **#8** says why a supplied baseline was not used.
+
 Every result is now PASS, FAIL or NOT SCORED, with the counts behind it. A check whose
 population is empty, or whose inputs are missing, is NOT SCORED with the reason, never a
 pass, and stays out of both numbers of the score. Percentage thresholds are tested on the
@@ -26,7 +33,10 @@ exact counts, never on a rounded percentage. Per check:
 - **#1 Logic.** Only logic relationships count: a link to a level of effort or WBS
   summary no longer gives an activity a predecessor or successor. A start milestone is
   excused a missing predecessor only at the network start, and a finish milestone a
-  missing successor only at the network finish.
+  missing successor only at the network finish. A link to another project (a relationship
+  whose other end is outside the scored project, or P6's external early start or late
+  finish on the activity) counts as a predecessor or successor here, and the number of
+  activities linked only that way is given; #2 to #4 do not grade those links.
 - **#2 Leads, #3 Lags, #4 Relationship types.** Measured on live relationships only:
   both ends in the project, neither end a level of effort or WBS summary, and the
   successor not yet complete. A lead into finished work is history and no longer fails
@@ -66,7 +76,10 @@ exact counts, never on a rounded percentage. Per check:
   shift times, from the data date to the completion's early finish. The float is the
   working time to the baseline finish of the same activity, or, with no baseline, the P6
   float where the file has a deadline or that float is not zero; otherwise not scored.
-  The deadline is the project's Must Finish By, or a Finish On or Finish On or Before on the completion; a completion pinned by a
+  The deadline is the project's Must Finish By, or a Finish On or Finish On or Before on the completion,
+  and its float is the working time from the forecast finish to that date on the project
+  calendar (the earliest date when several), so both terms are in the same working days;
+  with no named date, a non-zero P6 float is read on the completion's own calendar; a completion pinned by a
   mandatory constraint is not scored (#12 fails it while it is unfinished). The index is compared after
   rounding to six decimal places, so a CPLI of exactly 0.95 passes.
 - **#14 BEI.** Ordinary activities only in both counts; the numerator counts every
