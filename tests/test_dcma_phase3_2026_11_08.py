@@ -21,13 +21,13 @@ from xer_parser import parse_xer  # noqa: E402
 
 FX = os.path.join(SCRIPT_DIR, 'fixtures', 'dcma_parity')
 
-try:
-    import cpm  # noqa: F401
-    HAVE_ENGINE = True
-except Exception:  # pragma: no cover - a copy without the engine
-    HAVE_ENGINE = False
+from critical_path_test import can_run  # noqa: E402
 
-needs_engine = pytest.mark.skipif(not HAVE_ENGINE, reason='the CPM engine is not installed here')
+# The test runs where CPP's CPM engine imports and this copy of the validator
+# builds the recalculation network (the public repository does not).
+HAVE_ENGINE = can_run()
+
+needs_engine = pytest.mark.skipif(not HAVE_ENGINE, reason='the test cannot be run in this copy')
 
 
 def _twelve(name):
@@ -82,6 +82,23 @@ def test_without_the_engine_the_test_is_not_run_and_says_so(monkeypatch):
     assert 'CPM engine is not available' in pc['details'].get('test_not_run_reason', '')
     # and a pinned completion still fails
     assert _twelve('p5_mandatory.xer')['counts']['status'] == 'FAIL'
+
+
+def test_a_copy_that_cannot_build_the_network_does_not_run_the_test(monkeypatch):
+    # The public repository's cp_validator has no driver-chain network: there
+    # the test is not run even with the public engine beside it, and says so
+    # (8-Nov-26: its CI read 'the network could not be built (AttributeError)').
+    # A stand-in engine, so the engine is not what stops the test here.
+    import types
+    stub = types.ModuleType('cpm')
+    stub.compute_cpm = lambda *a, **k: {}
+    monkeypatch.setitem(sys.modules, 'cpm', stub)
+    import cp_validator
+    monkeypatch.delattr(cp_validator, '_driver_chain_network', raising=False)
+    pc = _twelve('p10_late_no_baseline.xer')
+    assert pc['counts']['status'] == 'NOT SCORED'
+    assert pc['details'].get('test_run') is False
+    assert 'does not build the network' in pc['details'].get('test_not_run_reason', '')
 
 
 @needs_engine

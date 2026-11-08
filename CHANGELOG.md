@@ -68,17 +68,18 @@ exact counts, never on a rounded percentage. Per check:
   missed. Not scored when fewer than 80% of the due activities match. An ID that appears
   twice in a file is left out and the number is disclosed.
 - **#12 Critical path test.** Fails on a logic cycle as well as on an unfinished
-  completion pinned by a mandatory constraint. Where CPP's CPM engine is installed beside
-  this repository (it is not shipped here), the test itself is run
+  completion pinned by a mandatory constraint. In CPP's own validator, which builds the
+  recalculation network on CPP's CPM engine, the test itself is run
   (`scripts/critical_path_test.py`): the schedule is recalculated as filed and with 600
   working days added to the unfinished activity on the completion's driving path nearest
   the data date whose finish drives that path, and #12 passes only when the completion
   moves by the delay; a failure names the activity where the delay is lost and what holds
   it. The test is not run on a network of more than 5,000 activities, or past 20 seconds
   for the run as filed and 60 for the whole test (above 500 activities each recalculation
-  runs in a separate process that is stopped at the limit). Without the
-  engine the result says the test was not run, and #12 is decided only in the certain
-  cases above. On a finished completion the pin decides
+  runs in a separate process that is stopped at the limit). This repository's
+  `cp_validator` does not build that network, so here the test is not run, even with
+  the public engine beside it: the result says so, and #12 is decided only in the
+  certain cases above. On a finished completion the pin decides
   nothing (no remaining network for a delay to move, and P6 does not apply a constraint
   to finished work), so an as-built schedule is not failed for it. A completion with no predecessor is not scored (that is #1's
   finding); it no longer fails.

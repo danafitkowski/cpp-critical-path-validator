@@ -22,8 +22,9 @@ along is tried, up to MAX_TRIES. The completion's move is measured as working
 time on the test activity's own calendar, the calendar the 600 working days
 were added on.
 
-Without the engine (a public copy of this repository, which does not ship it)
-the test is not run and #12 is decided only where the answer is certain, as
+Without the engine, or in a copy of the validator that does not build that
+network (the public repository, even with the public engine beside it), the
+test is not run and #12 is decided only where the answer is certain, as
 before; the result says which.
 """
 import copy
@@ -159,6 +160,31 @@ def _parse(dt):
     return None
 
 
+NETWORK_BUILDERS = ('_detect_schedule_options', '_driver_chain_network', '_assignment_counts',
+                    '_rd_assignments')
+
+
+def can_build_network(cv=None):
+    """This copy of the validator builds the network the recalculation needs
+    (the public repository's cp_validator does not: there the test is not run,
+    even with the engine installed beside it)."""
+    if cv is None:
+        try:
+            import cp_validator as cv
+        except Exception:
+            return False
+    return all(hasattr(cv, name) for name in NETWORK_BUILDERS)
+
+
+def can_run():
+    """The test can run here: the CPM engine imports and the network can be built."""
+    try:
+        import cpm  # noqa: F401
+    except Exception:
+        return False
+    return can_build_network()
+
+
 def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
         is_ordinary, is_complete, working_days_between):
     """Run the test. Returns a dict:
@@ -178,6 +204,9 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
     except Exception as exc:  # the engine is not part of this installation
         return {'ran': False, 'reason': 'the CPM engine is not available here (%s)'
                 % (exc.__class__.__name__,)}
+    if not can_build_network(cv):
+        return {'ran': False, 'reason': ('this copy of the validator does not build the network a '
+                                         'recalculation needs')}
     try:
         opts = cv._detect_schedule_options(data, proj_id)
         net = cv._driver_chain_network(

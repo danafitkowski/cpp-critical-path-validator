@@ -28,11 +28,11 @@ import dcma14  # noqa: E402
 from dcma14 import dcma_14_assess  # noqa: E402
 from xer_parser import parse_xer  # noqa: E402
 
-try:
-    import cpm  # noqa: F401,E402  (CPP's CPM engine, for #12's 600-day test)
-    HAVE_ENGINE = True
-except Exception:  # this repository does not ship it
-    HAVE_ENGINE = False
+# #12's 600-day test runs where CPP's CPM engine imports and this copy of the
+# validator builds the recalculation network (this repository does not, even
+# with the public engine beside it).
+from critical_path_test import can_run as _cpt_can_run  # noqa: E402
+HAVE_ENGINE = _cpt_can_run()
 
 FIXTURES = os.path.join(SCRIPT_DIR, 'fixtures', 'dcma_parity')
 DEFINITION_JSON = os.path.join(FIXTURES, 'dcma_definition.json')
@@ -80,8 +80,8 @@ def test_parity(fixture, check):
     got = pc['counts']
     where = f'{fixture} #{check}: {pc["message"]}'
     expect = want['status']
-    # A #12 result the 600-day test decides (by: 'test') needs CPP's CPM
-    # engine, which this repository does not ship; without it, NOT SCORED.
+    # A #12 result the 600-day test decides (by: 'test') needs the test, which
+    # this repository cannot run; here it is NOT SCORED.
     if want.get('by') == 'test' and not HAVE_ENGINE:
         expect = 'NS'
     assert got['status'] == STATUS[expect], (got, where)
