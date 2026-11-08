@@ -411,8 +411,7 @@ def test_a_finish_that_does_not_take_the_delay_for_no_named_reason_is_not_scored
 
 @needs_engine
 def test_the_p6_longest_path_flag_off_the_tested_path_is_disclosed(monkeypatch):
-    # the file carries the P6 answer too; on two real files every
-    # activity on the tested path read N.
+    # the file carries the P6 answer too.
     data = _drop_a2_pin(_p22())
     _task(data, 'A1')['driving_path_flag'] = 'N'
     pc, raw = _raw(data, monkeypatch)
@@ -460,7 +459,7 @@ def test_a_failure_names_where_the_delay_is_lost_for_the_register(monkeypatch):
 
 
 def test_a_named_deadline_needs_no_exported_float():
-    # A blank float on the completion left a schedule with
+    # a blank float on the completion left a schedule with
     # a deadline NOT SCORED; the deadline's working time needs no P6 float.
     data = copy.deepcopy(parse_xer(os.path.join(FX, 'p19_calendar_mix.xer')))
     for t in data['tables']['TASK']['records']:
@@ -478,3 +477,94 @@ def test_a_finished_completion_is_not_said_to_fail_12():
     assert res['DCMA-12-CriticalPathTest']['counts']['status'] == 'NOT SCORED'
     assert res['DCMA-13-CPLI']['counts']['status'] == 'NOT SCORED'
     assert '#12 fails it' not in res['DCMA-13-CPLI']['message']
+
+
+# ── The second round of the final review (8-Nov-26) ──
+
+def _ss_a1(data):
+    for r in data['tables']['TASKPRED']['records']:
+        if r['task_id'] == '10003':
+            r['pred_type'] = 'PR_SS'
+    return data
+
+
+@needs_engine
+def test_a_soft_start_constraint_does_not_block_the_start_delay(monkeypatch):
+    # Every start constraint was read as a hold: a Start On or After at the
+    # data date FAILED with no recalculation. Only a primary Mandatory Start on
+    # its date holds a start (fixtures p23 and p24 pin both sides).
+    data = _ss_a1(_drop_a2_pin(_p22()))
+    _task(data, 'A1')['cstr_type'] = 'CS_MSOA'
+    _task(data, 'A1')['cstr_date'] = '2026-06-01 08:00'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['start_delay'] is True and raw['slip_days'] == 600
+
+
+@needs_engine
+def test_a_mandatory_start_before_the_data_date_does_not_hold_the_start(monkeypatch):
+    # P6 starts the work at the data date (probes of 13-Oct-26), so the start
+    # delay is inserted and judged by the move.
+    data = _ss_a1(_drop_a2_pin(_p22()))
+    _task(data, 'A1')['cstr_type'] = 'CS_MANDSTART'
+    _task(data, 'A1')['cstr_date'] = '2026-05-15 08:00'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+
+
+@needs_engine
+def test_a_pinned_start_reports_no_measured_move(monkeypatch):
+    data = _ss_a1(_drop_a2_pin(_p22()))
+    _task(data, 'A1')['cstr_type'] = 'CS_MANDSTART'
+    _task(data, 'A1')['cstr_date'] = '2026-06-08 08:00'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'FAIL'
+    assert raw['slip_days'] is None
+
+
+@needs_engine
+def test_a_start_that_does_not_take_the_delay_for_no_named_reason_is_not_scored(monkeypatch):
+    # As a finish in the duration test: the start delayed run is made to leave
+    # A1's start where it was.
+    import critical_path_test as cpt
+    data = _ss_a1(_drop_a2_pin(_p22()))
+    real = cpt._recalc
+    calls = []
+    kept = {}
+
+    def frozen(compute_cpm, acts, rels, kwargs, seconds, in_child):
+        res = real(compute_cpm, acts, rels, kwargs, seconds, in_child)
+        calls.append(1)
+        if len(calls) == 1:
+            kept['es'] = res['nodes']['A1'].get('early_start_dt')
+        elif any((a.get('constraint') or a.get('constraint2') or {}).get('type') == 'CS_MSOA'
+                 for a in acts if a.get('code') == 'A1'):
+            res['nodes']['A1']['early_start_dt'] = kept['es']
+        return res
+    monkeypatch.setattr(cpt, '_recalc', frozen)
+    pc = _twelve(data)
+    assert pc['counts']['status'] == 'NOT SCORED', pc['message']
+    assert 'did not move its start by the delay' in pc['message']
+
+
+@needs_engine
+def test_the_recalculation_uses_the_lifted_data_date(monkeypatch, tmp_path):
+    # D14: a data date on a day before a later planned start is lifted to it;
+    # the parser writes the lifted date into the project record the test reads.
+    import critical_path_test as cpt
+    src = os.path.join(FX, 'p10_late_no_baseline.xer')
+    text = open(src, encoding='utf-8').read().replace('2026-06-01 08:00', '2026-05-01 08:00', 1)
+    f = tmp_path / 'lift.xer'
+    f.write_text(text, encoding='utf-8')
+    seen = []
+    real = cpt._recalc
+
+    def spy(compute_cpm, acts, rels, kwargs, seconds, in_child):
+        seen.append(kwargs.get('data_date'))
+        return real(compute_cpm, acts, rels, kwargs, seconds, in_child)
+    monkeypatch.setattr(cpt, '_recalc', spy)
+    data = parse_xer(str(f))
+    lifted = data['tables']['PROJECT']['records'][0]['last_recalc_date']
+    assert lifted == data['tables']['PROJECT']['records'][0]['plan_start_date'] != '2026-05-01 08:00'
+    _twelve(data)
+    assert seen and set(seen) == {lifted}

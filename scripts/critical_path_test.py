@@ -48,11 +48,7 @@ TEST_SECONDS_LIMIT = 60.0
 # Up to this size the recalculations run in this process: the test suites call
 # it hundreds of times on small networks. Above it each one runs in a child
 # process that is stopped at the time limit, so a network the engine is slow
-# on cannot hold up the tool that asked (8-Nov-26: floats of thousands of days
-# took the as-filed run of a 3,000-activity synthetic file to 112 seconds, and
-# a limit read only after the run had finished could not stop it). At that
-# file's rate (about 37 ms an activity) four in-process runs of 100 activities
-# stay well inside the test's 60 seconds; 500 did not (review of the test, 8-Nov-26).
+# on cannot hold up the tool that asked.
 IN_PROCESS_ACTIVITIES = 100
 
 # The child: one compute_cpm call, handing back only what the test reads.
@@ -340,7 +336,7 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
     if not candidates and not start_driven:
         if start_driver == 'CONSTRAINT':
             return {'ran': True, 'status': 'FAIL', 'test_activity': None, 'delay_days': DELAY_WORKING_DAYS,
-                    'slip_days': 0.0, 'driving_path': list(reversed(chain)),
+                    'slip_days': 0.0, 'driving_path': list(reversed(chain)), 'lost_at': comp_code,
                     'message': ('Critical Path Test FAILS: no unfinished work drives the completion '
                                 'activity %s; it is held by a constraint, so a delay inserted on the '
                                 'critical path cannot move it.' % comp_code)}
@@ -630,31 +626,43 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
         start is held 600 working days later (review of the test,
         8-Nov-26: the stretch such an activity covers was named, not tested).
         Returns (judgement or None, why it could not be made)."""
-        # A start a constraint already holds as filed (a Mandatory Start on its
-        # date, or a start constraint the engine names as its driver) cannot
-        # take a start delay: the inserted Start On or After would override the
-        # very pin the test is there to find (final review, 8-Nov-26: a
-        # Mandatory Start was overridden and the test passed). FAIL there.
+        # Only a Mandatory Start in the primary slot holds a start: P6 pins the
+        # activity to its date whatever its predecessors say. A Start On or
+        # After, Start On or Start On or Before does not hold a start against a
+        # later date (the inserted delay moves it, and is judged by the move),
+        # and a Mandatory Start in the second slot is a floor (final review,
+        # 8-Nov-26: every start constraint was read as a hold, and a Start On
+        # or After at the data date FAILED with no recalculation; before that,
+        # the inserted Start On or After overrode a Mandatory Start and passed).
         cal = _cal_of(c)[1]
         task_c = by_code.get(c) or {}
-        pinned_start = (_constraints_at(task_c, nodes.get(c) or {}, _same_time(cal), 'start')
-                        or (_constraints_of(task_c, 'start')
-                            if ((nodes.get(c) or {}).get('driving_predecessor') or {}).get('type') == 'CONSTRAINT'
-                            else []))
+
+        def _mand_start_holds(node):
+            if (task_c.get('cstr_type') or '').strip() != 'CS_MANDSTART':
+                return []
+            when_s = (task_c.get('cstr_date') or '').strip()
+            when, es = _parse(when_s), _es(node)
+            on_date = bool(when and es and (es.date() == when.date() or _same_time(cal)(es, when)))
+            driven = ((node or {}).get('driving_predecessor') or {}).get('type') == 'CONSTRAINT'
+            return ['Mandatory Start of %s' % when_s] if (on_date or driven) else []
+
+        def _extra():
+            if after_main is None:
+                return ''
+            return (' A duration delay of %d working days on %s, further along the path, moved the completion '
+                    'by %s working days.' % (DELAY_WORKING_DAYS, after_main['test_activity'],
+                                             '{:g}'.format(after_main['slip_days'])))
+
+        pinned_start = _mand_start_holds(nodes.get(c))
         if pinned_start:
             return {'ran': True, 'status': 'FAIL', 'test_activity': c, 'completion_activity': comp_code,
-                    'delay_days': DELAY_WORKING_DAYS, 'slip_days': 0.0, 'lost_at': c,
+                    'delay_days': DELAY_WORKING_DAYS, 'slip_days': None, 'lost_at': c,
                     'driving_path': path, 'start_delay': True,
                     'message': ("Critical Path Test FAILS: recalculated on the CPP CPM engine, %s (an unfinished "
                                 "activity on the completion's driving path that drives it through its start) "
                                 "cannot take a start delay of %d working days: its %s holds its start, so a "
                                 "constraint, not logic, holds the critical path there.%s"
-                                % (c, DELAY_WORKING_DAYS, ' and '.join(pinned_start),
-                                   '' if after_main is None else
-                                   (' A duration delay of %d working days on %s, further along the path, moved '
-                                    'the completion by %s working days.'
-                                    % (DELAY_WORKING_DAYS, after_main['test_activity'],
-                                       '{:g}'.format(after_main['slip_days'])))))}, None
+                                % (c, DELAY_WORKING_DAYS, ' and '.join(pinned_start), _extra()))}, None
         delayed, why = _start_delayed(c)
         if delayed is None:
             return None, why
@@ -665,10 +673,10 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
         s0, s1 = _es(nodes.get(c)), _es(s_node)
         own = working_days_between(s0, s1, cal) if (s0 and s1) else None
         if own is None or own < DELAY_WORKING_DAYS - SLIP_TOLERANCE_DAYS:
-            held = _constraints_at(task_c, s_node, _same_time(cal), 'start')
+            held = _mand_start_holds(s_node)
+            c_after = _ef((res.get('nodes') or {}).get(comp_code))
+            c_slip = working_days_between(date_before, c_after, cal) if c_after else None
             if held:
-                c_after = _ef((res.get('nodes') or {}).get(comp_code))
-                c_slip = working_days_between(date_before, c_after, cal) if c_after else None
                 return {'ran': True, 'status': 'FAIL', 'test_activity': c, 'completion_activity': comp_code,
                         'delay_days': DELAY_WORKING_DAYS, 'lost_at': c,
                         'slip_days': round(c_slip, 2) if c_slip is not None else None,
@@ -676,9 +684,19 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
                         'message': ("Critical Path Test FAILS: recalculated on the CPP CPM engine, a start delay "
                                     "of %d working days inserted on %s (an unfinished activity on the completion's "
                                     "driving path that drives it through its start) did not move its start: its "
-                                    "%s holds it, so a constraint, not logic, holds the critical path there."
-                                    % (DELAY_WORKING_DAYS, c, ' and '.join(held)))}, None
-            return None, 'its start did not take the delay'
+                                    "%s holds it, so a constraint, not logic, holds the critical path there.%s"
+                                    % (DELAY_WORKING_DAYS, c, ' and '.join(held), _extra()))}, None
+            # A start that does not take the delay for no reason the test can
+            # name is NOT SCORED, as a finish is in the duration test (final
+            # review, 8-Nov-26: it had left the duration PASS standing).
+            moved = '' if own is None else ', moving by %s working days' % '{:g}'.format(round(own, 2))
+            return {'ran': True, 'status': 'NS', 'test_activity': c, 'delay_days': DELAY_WORKING_DAYS,
+                    'slip_days': None, 'driving_path': path, 'start_delay': True,
+                    'message': ("Critical Path Test NOT SCORED: a start delay of %d working days inserted on %s "
+                                "(an unfinished activity on the completion's driving path that drives it through "
+                                "its start) did not move its start by the delay%s, and no Mandatory Start holds it; "
+                                "the recalculation cannot say why, so the test is not scored.%s"
+                                % (DELAY_WORKING_DAYS, c, moved, _extra()))}, None
         lead = ("recalculated on the CPP CPM engine, a start delay of %d working days inserted on %s (an "
                 "unfinished activity on the completion's driving path that drives it through its start, so its "
                 "start, not its duration, is delayed)" % (DELAY_WORKING_DAYS, c))

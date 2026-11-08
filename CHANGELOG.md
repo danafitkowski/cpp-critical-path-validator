@@ -79,8 +79,10 @@ exact counts, never on a rounded percentage. Per check:
   constraint drives it), with the completion's move measured; one that does not take the
   delay for no reason the test can name is not scored. An unfinished activity nearer the
   data date that drives the path only through its start then takes a start delay (its
-  start held 600 working days later), which decides #12; one whose start a constraint
-  already holds fails there, and a path carried only by start links is tested the same
+  start held 600 working days later), which decides #12; one whose start a Mandatory
+  Start already holds fails there (any other start constraint does not hold a start
+  against a later date), one whose start does not take the delay for no reason the test
+  can name is not scored, and a path carried only by start links is tested the same
   way. A smaller move passes only when every activity after the test
   activity on the as-filed path moved later, none on that path or on the delayed driving
   chain had its finish set by an expected finish or sits on a constraint, the completion

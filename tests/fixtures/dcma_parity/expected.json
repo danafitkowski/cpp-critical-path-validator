@@ -416,5 +416,25 @@
     "by": "test"
    }
   }
+ },
+ "p23_start_link_soft_constraint": {
+  "current": "p23_start_link_soft_constraint.xer",
+  "baseline": null,
+  "checks": {
+   "12": {
+    "status": "PASS",
+    "by": "test"
+   }
+  }
+ },
+ "p24_start_link_mandatory": {
+  "current": "p24_start_link_mandatory.xer",
+  "baseline": null,
+  "checks": {
+   "12": {
+    "status": "FAIL",
+    "by": "test"
+   }
+  }
  }
 }
