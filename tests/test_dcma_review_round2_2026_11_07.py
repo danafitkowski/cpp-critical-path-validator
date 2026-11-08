@@ -79,3 +79,23 @@ def test_an_unreadable_duration_is_left_out_of_8():
 ])
 def test_readable_hours(cell, hours):
     assert _readable_hours(cell) == hours
+
+
+# ── Claude AI review, round 2 ─────────────────────────────────────────────
+
+def test_a_duplicated_id_with_a_blank_duration_is_disclosed_once():
+    """#8: an activity whose Activity ID is ambiguous AND whose duration is
+    blank was listed both as 'read on the current duration' and as 'left out
+    for no duration'. It was never read, so it is disclosed only as blank."""
+    from config_profiles import get_profile
+    tasks = [
+        {'task_id': '1', 'task_code': 'X1', 'task_type': 'TT_Task', 'status_code': 'TK_NotStart',
+         'target_drtn_hr_cnt': '', 'clndr_id': ''},
+        {'task_id': '2', 'task_code': 'X2', 'task_type': 'TT_Task', 'status_code': 'TK_NotStart',
+         'target_drtn_hr_cnt': '40', 'clndr_id': ''},
+    ]
+    sev, pct, thr, msg, det = dcma14._check_08_high_duration(
+        tasks, {}, get_profile('commercial'), baseline_basis={'days': {}, 'ambiguous': {'X1'}})
+    assert det['blank_duration_left_out'] == ['X1']
+    assert det['ambiguous_left_out'] == []
+    assert det['counts']['den'] == 1

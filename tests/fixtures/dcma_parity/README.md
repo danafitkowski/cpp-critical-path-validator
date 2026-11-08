@@ -17,7 +17,7 @@ Synthetic schedules (no client data) with the results `DCMA_DEFINITION.md` (besi
 | 5 | hard-constrained activities | incomplete ordinary activities |
 | 6 | float above 44 working days | incomplete ordinary activities with a computed float |
 | 7 | negative float | as #6 |
-| 8 | duration above 44 working days | incomplete ordinary activities |
+| 8 | duration above 44 working days | incomplete ordinary activities with a readable original duration |
 | 9 | activities with an invalid date | ordinary activities and milestones, complete included |
 | 10 | resourced activities | incomplete ordinary activities of at least 1 working day |
 | 11 | missed | due baseline activities, less those whose lateness is unknown |
@@ -50,5 +50,6 @@ Synthetic schedules (no client data) with the results `DCMA_DEFINITION.md` (besi
 | p13_current + p13_baseline | a baseline sharing no Activity ID is not used (D9): #11, #13, #14 not scored, #8 on current durations |
 | p14_current + p14_baseline | #8: a blank duration left out; a baseline activity's duration on its own inherited calendar; a blank baseline duration reads the current one |
 | p15_no_forecasts | #9: an actual after the data date fails even when the incomplete work carries no forecasts |
+| p16_as_built_mandatory | #12: a finished completion's Mandatory Finish decides nothing (not scored, no cycle) |
 
 Working-day counts assume the fixtures' calendars, which carry no holidays except the one p11_short_day tests.

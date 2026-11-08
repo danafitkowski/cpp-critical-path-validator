@@ -1045,6 +1045,10 @@ def _check_08_high_duration(incomplete, cal_map, profile, baseline_basis=None):
             on_baseline += 1
         elif _readable_hours(t.get('target_drtn_hr_cnt', '')) is None:
             # A blank or unreadable duration is not zero: it is left out and counted.
+            # One with a duplicated Activity ID was never read on its current
+            # duration either, so it is disclosed here only.
+            if left_out and left_out[-1] == _code(t):
+                left_out.pop()
             blank.append(_code(t))
             continue
         else:
@@ -1526,7 +1530,12 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None):
         soft = [c for c in cstrs if c in HARD_DATE]
         det.update({'finish_activity': code, 'finish_date': str(finish_dt),
                     'finish_constraints': pinned, 'finish_soft_constraints': soft})
-        if pinned:
+        # A FINISHED completion has no remaining network for a delay to move,
+        # and P6 does not apply a constraint to finished work, so its pin
+        # decides nothing.
+        if pinned and _is_complete(finish_task):
+            det['finish_complete'] = True
+        elif pinned:
             reasons.append(
                 f'the project finish activity {code} is pinned by '
                 f'{"/".join(pinned)}, so inserting a large delay upstream '
@@ -1542,6 +1551,13 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None):
         return INFO, None, None, (
             'No dated activity — the project finish could not be identified, so '
             'the Critical Path Test was NOT SCORED.'
+        ), det
+    if det.get('finish_complete'):
+        return INFO, None, None, (
+            f'Critical Path Test NOT SCORED. The project finish activity {code} is '
+            f'complete, so there is no remaining network for an inserted delay to '
+            f'move, and its {"/".join(pinned)} constraint no longer applies; the '
+            f'logic network carries no cycle.'
         ), det
     if not pred_map.get(finish_task['task_id']):
         det['no_predecessor'] = True

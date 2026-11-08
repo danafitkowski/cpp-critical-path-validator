@@ -57,15 +57,17 @@ exact counts, never on a rounded percentage. Per check:
   (trimmed, case ignored). One that is no longer in the current schedule counts as
   missed. Not scored when fewer than 80% of the due activities match. An ID that appears
   twice in a file is left out and the number is disclosed.
-- **#12 Critical path test.** Fails on a logic cycle as well as on a completion pinned by
-  a mandatory constraint. A completion with no predecessor is not scored (that is #1's
+- **#12 Critical path test.** Fails on a logic cycle as well as on an unfinished
+  completion pinned by a mandatory constraint. On a finished completion the pin decides
+  nothing (no remaining network for a delay to move, and P6 does not apply a constraint
+  to finished work), so an as-built schedule is not failed for it. A completion with no predecessor is not scored (that is #1's
   finding); it no longer fails.
 - **#13 CPLI.** The critical path length is the working time on the project calendar's
   shift times, from the data date to the completion's early finish. The float is the
   working time to the baseline finish of the same activity, or, with no baseline, the P6
   float where the file has a deadline or that float is not zero; otherwise not scored.
-  The deadline is a Finish On or Before on the completion; a completion pinned by a
-  mandatory constraint is not scored (#12 fails it). The index is compared after
+  The deadline is the project's Must Finish By, or a Finish On or Finish On or Before on the completion; a completion pinned by a
+  mandatory constraint is not scored (#12 fails it while it is unfinished). The index is compared after
   rounding to six decimal places, so a CPLI of exactly 0.95 passes.
 - **#14 BEI.** Ordinary activities only in both counts; the numerator counts every
   activity complete as of the data date, so the index can exceed 1.0. Compared after
