@@ -106,8 +106,8 @@ exact counts, never on a rounded percentage. Per check:
   working time to the baseline finish of the same activity, or, with no baseline, the
   working time to a deadline date the file names (the project's Must Finish By, or a
   Finish On or Finish On or Before date on the completion; no exported float is needed),
-  else the P6 float where it is not zero; otherwise not scored. A finished completion is
-  not scored.
+  else the P6 float where it is not zero; otherwise not scored, and a blank exported float
+  is reported as blank, not as zero. A finished completion is not scored, and says so.
   The deadline is the project's Must Finish By, or a Finish On or Finish On or Before on the completion,
   and its float is the working time from the forecast finish to that date on the project
   calendar (the earliest date when several), so both terms are in the same working days;

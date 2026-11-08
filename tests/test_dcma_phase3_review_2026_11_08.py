@@ -568,3 +568,29 @@ def test_the_recalculation_uses_the_lifted_data_date(monkeypatch, tmp_path):
     assert lifted == data['tables']['PROJECT']['records'][0]['plan_start_date'] != '2026-05-01 08:00'
     _twelve(data)
     assert seen and set(seen) == {lifted}
+
+
+# #13 gives the health report's reasons: a blank float is blank, not zero; a
+# finished completion says it is complete.
+def _thirteen(data):
+    return dcma_14_assess(data)['per_check']['DCMA-13-CPLI']
+
+
+def test_13_a_blank_float_with_no_deadline_is_called_blank_not_zero():
+    data = copy.deepcopy(parse_xer(os.path.join(FX, 'p19_calendar_mix.xer')))
+    f = _task(data, 'F')
+    for k in ('total_float_hr_cnt', 'cstr_type', 'cstr_date', 'cstr_type2', 'cstr_date2'):
+        f[k] = ''
+    for p in data['tables']['PROJECT']['records']:
+        p['plan_end_date'] = ''
+    check = _thirteen(data)
+    assert check['value'] is None, check
+    assert 'carries no exported total float' in check['message'], check['message']
+    assert 'by construction' not in check['message'], check['message']
+
+
+def test_13_a_finished_completion_says_it_is_complete():
+    data = parse_xer(os.path.join(FX, 'p16_as_built_mandatory.xer'))
+    check = _thirteen(data)
+    assert check['value'] is None, check
+    assert 'is complete, so there is no remaining critical path' in check['message'], check['message']

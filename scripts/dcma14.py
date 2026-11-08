@@ -1656,14 +1656,20 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
             is earlier. If that ID is not in the baseline, the baseline
             project's own completion activity is used and the message says so.
             basis='baseline'.
-          – without a baseline, only when the file carries a deadline
-            (PROJECT.plan_end_date, P6 'Must Finish By', or a CS_MEO / CS_MEOB /
-            CS_MANDFIN constraint on the completion activity) or that float is
-            not zero: the P6 total float of the completion activity (D3: its own
-            calendar). basis='p6_float_to_deadline'.
+          – without a baseline, when the file NAMES a deadline (P6's Must
+            Finish By, PROJECT.plan_end_date, or the date of a Finish On /
+            Finish On or Before on the completion activity; the earliest when
+            several): the working time from the forecast finish to that date
+            on the project calendar, measured as the baseline case is. No
+            exported float is needed.
+          – with no deadline named but a NON-ZERO exported float on the
+            completion activity: that float (D3: its own calendar), since P6
+            measured it against some date; the basis says so.
           – otherwise NOT SCORED: with no deadline P6 computes the finish
             activity's float against its own early finish, so it is 0 by
-            construction and CPLI would read 1.000.
+            construction and CPLI would read 1.000; a blank float is reported
+            as blank. A finished or pinned (Mandatory Start / Finish)
+            completion is NOT SCORED with its own reason.
 
     The float term used to be the MINIMUM float over the whole critical set,
     which capped the index at 1.0 and, on five real exports, produced a
@@ -1684,6 +1690,13 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
         return _ns('CPLI NOT SCORED: no activities or no data date — CPLI not computable.')
 
     finish_task, latest_ef = _completion_activity(work_tasks)
+    fin_code = (finish_task or {}).get('task_code', '')
+    if finish_task is not None and _is_complete(finish_task):
+        # A finished completion has no remaining critical path, and its pin no
+        # longer applies; #12 does not fail it either. Tested before the data
+        # date, which its actual finish would trip first with a vaguer reason.
+        return _ns(f'CPLI NOT SCORED: the completion activity {fin_code} is complete, so there is no '
+                   'remaining critical path to measure.')
     if latest_ef is None or latest_ef <= data_date_dt:
         return _ns('CPLI NOT SCORED: the completion activity finishes at or '
                    'before the data date (or carries no finish), so there is no '
@@ -1697,12 +1710,6 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
         return _ns('CPLI NOT SCORED: CP length ≤ 0 or not computable '
                    '(unbounded/sentinel finish) — CPLI not computable.')
 
-    fin_code = (finish_task or {}).get('task_code', '')
-    if finish_task is not None and _is_complete(finish_task):
-        # A finished completion has no remaining critical path, and its pin no
-        # longer applies; #12 does not fail it either.
-        return _ns(f'CPLI NOT SCORED: the completion activity {fin_code} is complete, so there is no '
-                   'remaining critical path to measure.', cp_length_days=cp_length_days)
     pinned = [c for c in ((finish_task or {}).get('cstr_type', ''), (finish_task or {}).get('cstr_type2', ''))
               if c in DCMA_MANDATORY_CONSTRAINTS]
     if pinned:
@@ -1774,7 +1781,14 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
     # some date even where the file names none (real exports with no Must
     # Finish By carry negative float on the finish activity), so it is used
     # and the basis says so.
-    if not must_finish_by and not fin_cstrs and (tf_hrs is None or tf_hrs == 0):
+    if not must_finish_by and not fin_cstrs and tf_hrs is None:
+        # A blank exported float is not a zero one.
+        return _ns(f'CPLI NOT SCORED: no baseline, no deadline date in the file, and the completion '
+                   f'activity {fin_code} carries no exported total float, so CPLI cannot be computed. '
+                   'Supply the baseline XER or a Must Finish By date, or recalculate the schedule in '
+                   'P6 and re-export.', basis=None, cp_length_days=cp_length_days,
+                   finish_activity=fin_code)
+    if not must_finish_by and not fin_cstrs and tf_hrs == 0:
         return _ns('CPLI NOT SCORED: no baseline and no deadline in the file, so '
                    'the float to completion is 0 by construction and CPLI would '
                    'read 1.000. Supply the baseline XER, or a Must Finish By date '
