@@ -487,22 +487,36 @@ def _readable_hours(v):
     return x if x == x and x not in (float('inf'), float('-inf')) else None
 
 
-def _completion_tie_rank(t):
-    """D11 tie order: a finish milestone, then an activity of zero original
-    duration (a completion typed as a task), then anything else."""
+def _completion_tie_rank(t, with_successor=None):
+    """D11 tie order: the end of the network (no logic relationship leads from
+    it; read only when ``with_successor``, the ids that have one, is given),
+    then a finish milestone, then an activity of zero original duration (a
+    completion typed as a task), then anything else."""
+    end = 1 if with_successor is not None and t.get('task_id', '') not in with_successor else 0
     if t.get('task_type', '') == 'TT_FinMile':
-        return 2
+        return (end, 2)
     raw = str(t.get('target_drtn_hr_cnt', '') or '').strip()
     try:
-        return 1 if raw and float(raw) == 0 else 0
+        return (end, 1 if raw and float(raw) == 0 else 0)
     except (TypeError, ValueError):
-        return 0
+        return (end, 0)
 
 
-def _project_finish_task(work_tasks, finish_fn):
-    """(activity, instant) with the latest finish. On a tie: a finish
+def _with_successor(rels):
+    """The ids a logic relationship leads from (D4: ``rels`` is the scored
+    project's logic relationships, both ends ordinary or milestone)."""
+    return {r.get('pred_task_id', '') for r in rels or ()}
+
+
+def _project_finish_task(work_tasks, finish_fn, with_successor=None):
+    """(activity, instant) with the latest finish. On a tie: the end of the
+    network (an activity no logic relationship leads from), then a finish
     milestone, then an activity of zero original duration, else the first in
-    the file (D11; the zero-duration step added 2026-11-07, the written definition).
+    the file (D11; the zero-duration step added 2026-11-07, the written
+    definition; the end of the network 2026-11-08: two finish milestones on one
+    instant, the first in the file feeding the second, and file order took the
+    first, so #12 tested the path into a milestone that is not the project's
+    end).
 
     P6 schedules routinely land the last working activity and the completion
     milestone on the same instant, and several activities can share the finish
@@ -518,18 +532,32 @@ def _project_finish_task(work_tasks, finish_fn):
             continue
         if best_dt is None or d > best_dt:
             best, best_dt = t, d
-        elif d == best_dt and _completion_tie_rank(t) > _completion_tie_rank(best):
+        elif d == best_dt and (_completion_tie_rank(t, with_successor)
+                               > _completion_tie_rank(best, with_successor)):
             best = t
     return best, best_dt
 
 
-def _completion_activity(work_tasks):
+def _baseline_with_successor(baseline_data, baseline_rows):
+    """The baseline project's activities a logic relationship leads from (both
+    ends in its rows, ordinary or milestone), for D11's tie in the baseline;
+    None without a baseline."""
+    if not baseline_rows:
+        return None
+    ids = {t.get('task_id', '') for t in baseline_rows if _is_work_task(t)}
+    rels = ((baseline_data or {}).get('tables', {}).get('TASKPRED', {}) or {}).get('records') or []
+    return _with_successor(r for r in rels
+                           if r.get('task_id', '') in ids and r.get('pred_task_id', '') in ids)
+
+
+def _completion_activity(work_tasks, with_successor=None):
     """D11: the ordinary or milestone activity, complete or not, with the
-    latest early finish (else planned finish). On a tie: a finish milestone,
-    then an activity of zero original duration, else the first in the file.
-    Used by #12 and #13."""
+    latest early finish (else planned finish). On a tie: the end of the network
+    (no logic relationship leads from it; ``with_successor`` is the set of ids
+    one does), then a finish milestone, then an activity of zero original
+    duration, else the first in the file. Used by #12 and #13."""
     return _project_finish_task(
-        [t for t in work_tasks if _is_work_task(t)], _early_or_planned_finish)
+        [t for t in work_tasks if _is_work_task(t)], _early_or_planned_finish, with_successor)
 
 
 def _d0_rank_key(rows, data=None):
@@ -1539,7 +1567,8 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None, cpt
         return INFO, None, None, (
             'No work tasks — Critical Path Test NOT SCORED.'
         ), {'assessed': False, 'logic_cycles': [], 'counts': _ns_counts()}
-    finish_task, finish_dt = _completion_activity(work_tasks)
+    finish_task, finish_dt = _completion_activity(
+        work_tasks, _with_successor(r for rels in (pred_map or {}).values() for r in rels))
     by_id = {t['task_id']: t for t in work_tasks}
     cycle_codes = [[_code(by_id[i]) if i in by_id else i for i in c] for c in cycles]
     det = {'logic_cycles': cycle_codes, 'assessed': True}
@@ -1637,12 +1666,12 @@ def _check_12_critical_path_test(work_tasks, pred_map, profile, cycles=None, cpt
 
 
 def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
-                   baseline_tasks=None):
+                   baseline_tasks=None, with_successor=None, baseline_with_successor=None):
     """#13 Critical Path Length Index.
 
     CPLI = (CP length + float) / CP length, read on the completion activity
-    (D11: latest early finish, else planned finish; a finish milestone
-    preferred on a tie), where:
+    (D11: latest early finish, else planned finish; on a tie the end of the
+    network, then a finish milestone), where:
       • CP length = the WORKING TIME from the data date to its early finish on
         the project calendar, in working days: working hours divided by the
         calendar's hours per day (2026-11-07, the written definition; it counted whole
@@ -1658,8 +1687,9 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
             basis='baseline'.
           – without a baseline, when the file NAMES a deadline (P6's Must
             Finish By, PROJECT.plan_end_date, or the date of a Finish On /
-            Finish On or Before on the completion activity; the earliest when
-            several): the working time from the forecast finish to that date
+            Finish On or Before on the completion activity or on an activity
+            tied with it at the latest finish; the earliest when several):
+            the working time from the forecast finish to that date
             on the project calendar, measured as the baseline case is. No
             exported float is needed.
           – with no deadline named but a NON-ZERO exported float on the
@@ -1689,7 +1719,7 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
     if not work_tasks or data_date_dt is None:
         return _ns('CPLI NOT SCORED: no activities or no data date — CPLI not computable.')
 
-    finish_task, latest_ef = _completion_activity(work_tasks)
+    finish_task, latest_ef = _completion_activity(work_tasks, with_successor)
     fin_code = (finish_task or {}).get('task_code', '')
     if finish_task is not None and _is_complete(finish_task):
         # A finished completion has no remaining critical path, and its pin no
@@ -1744,7 +1774,7 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
                               and _bl_finish(bt) is not None), None)
         note = ''
         if contract_task is None:
-            contract_task, _ = _completion_activity(bl_work)
+            contract_task, _ = _completion_activity(bl_work, baseline_with_successor)
             if contract_task is not None:
                 note = (f' The finish activity {fin_code} is not in the '
                         f'baseline, so the baseline project\'s own completion '
@@ -1771,9 +1801,13 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
     # No baseline: the P6 float of the finish activity means something only
     # against a deadline in the file.
     must_finish_by = str((project or {}).get('plan_end_date', '') or '').strip()
-    fin_cstrs = [c for c in ((finish_task or {}).get('cstr_type', ''),
-                             (finish_task or {}).get('cstr_type2', ''))
-                 if c in CPLI_DEADLINE_CONSTRAINTS]
+    # The deadline may sit on any activity that finishes with the completion at
+    # the project's finish (the D11 tie), not only on the one D11 takes: two
+    # milestones on one instant, one feeding the other, carry it on either.
+    tied = [finish_task] + [t for t in work_tasks if t is not finish_task and _is_work_task(t)
+                            and _early_or_planned_finish(t) == latest_ef] if finish_task else []
+    fin_cstrs = [t.get(k, '') for t in tied for k in ('cstr_type', 'cstr_type2')
+                 if t.get(k, '') in CPLI_DEADLINE_CONSTRAINTS]
     tf_hrs = _float_hours(finish_task) if finish_task else None
     # With no deadline in the file P6 measures the finish activity's float
     # against its own early finish, so it is 0 and CPLI would read 1.000 by
@@ -1803,12 +1837,13 @@ def _check_13_cpli(work_tasks, cal_map, data_date_dt, profile, project=None,
     date_must_finish = _parse_date(must_finish_by) if must_finish_by else None
     if date_must_finish is not None:
         named.append((date_must_finish, f'Must Finish By {date_must_finish.date()}'))
-    for ctype, cfield in (('cstr_type', 'cstr_date'), ('cstr_type2', 'cstr_date2')):
-        if (finish_task or {}).get(ctype, '') in CPLI_DEADLINE_CONSTRAINTS:
-            date_constraint = _parse_date((finish_task or {}).get(cfield, ''))
-            if date_constraint is not None:
-                named.append((date_constraint, f'the {finish_task.get(ctype)} date '
-                              f'{date_constraint.date()} on {fin_code}'))
+    for t in tied:
+        for ctype, cfield in (('cstr_type', 'cstr_date'), ('cstr_type2', 'cstr_date2')):
+            if t.get(ctype, '') in CPLI_DEADLINE_CONSTRAINTS:
+                date_constraint = _parse_date(t.get(cfield, ''))
+                if date_constraint is not None:
+                    named.append((date_constraint, f'the {t.get(ctype)} date '
+                                  f'{date_constraint.date()} on {t.get("task_code", "")}'))
     if named:
         date_deadline, label = min(named, key=lambda x: x[0])
         tf_days = _working_days_between(latest_ef, date_deadline, cp_cal)
@@ -2474,7 +2509,7 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
     cycles = _logic_cycles([t['task_id'] for t in work_tasks], logic_rels)
     cpt = None
     if not cycles:
-        _comp, _ = _completion_activity(work_tasks)
+        _comp, _ = _completion_activity(work_tasks, _with_successor(logic_rels))
         # Not run where #12 is decided without it: a completion pinned by a
         # Mandatory Start or Finish fails, one with no predecessor is not
         # scored (review of 8-Nov-26: both recalculations
@@ -2498,7 +2533,8 @@ def dcma_14_assess(data, profile='commercial', baseline_data=None, proj_id=None)
     else:
         _run('DCMA-13-CPLI', 'Critical Path Length Index', 'DCMA 14-Point #13',
              _check_13_cpli(work_tasks, cal_map, data_date_dt, prof, project,
-                            baseline_tasks=baseline_rows))
+                            baseline_tasks=baseline_rows, with_successor=_with_successor(logic_rels),
+                            baseline_with_successor=_baseline_with_successor(baseline_data, baseline_rows)))
     if baseline_unusable:
         _run('DCMA-14-BEI', 'Baseline Execution Index', 'DCMA 14-Point #14',
              _no_usable_baseline('BEI', prof['bei_min'], bei=None))

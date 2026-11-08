@@ -436,5 +436,27 @@
     "by": "test"
    }
   }
+ },
+ "p25_tied_completion": {
+  "current": "p25_tied_completion.xer",
+  "baseline": null,
+  "checks": {
+   "12": {
+    "status": "FAIL"
+   },
+   "13": {
+    "status": "NS"
+   }
+  }
+ },
+ "p26_tied_deadline": {
+  "current": "p26_tied_deadline.xer",
+  "baseline": null,
+  "checks": {
+   "13": {
+    "status": "FAIL",
+    "value": 0.5
+   }
+  }
  }
 }
