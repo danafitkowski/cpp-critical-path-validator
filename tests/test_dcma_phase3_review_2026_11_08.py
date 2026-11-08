@@ -111,7 +111,7 @@ def test_an_expected_finish_that_absorbs_part_of_the_delay_is_named(monkeypatch)
     assert 0 < raw['slip_days'] < 599
     assert pc['counts']['status'] == 'FAIL', pc['message']
     assert 'first lost at A2' in pc['message']
-    assert 'its expected finish sets its finish' in pc['message']
+    assert 'its start moved by 600 working days, but its expected finish re-sized its remaining work' in pc['message']
     assert 'set the amount' not in pc['message']
 
 
@@ -190,3 +190,152 @@ def test_no_delayed_run_is_started_without_a_second_left(monkeypatch):
     pc = _twelve(_p22())
     assert pc['details'].get('test_run') is False
     assert 'before a delayed recalculation could be made' in pc['details'].get('test_not_run_reason', '')
+
+
+# ── The check of these fixes (8-Nov-26): Claude AI and Codex ──
+
+def _drop_a2_pin(data):
+    _task(data, 'A2')['cstr_type'] = ''
+    _task(data, 'A2')['cstr_date'] = ''
+    return data
+
+
+@needs_engine
+def test_a_blank_activity_calendar_takes_the_project_calendar_and_the_first_try(monkeypatch):
+    # Claude AI: the verdict alone cannot show the calendar was resolved; the
+    # tried list can. A1 has no calendar on a 10-hour project calendar.
+    data = _drop_a2_pin(_p22())
+    for c in data['tables']['CALENDAR']['records']:
+        c['clndr_data'] = c['clndr_data'].replace('s|08:00|f|16:00', 's|07:00|f|17:00')
+        c['day_hr_cnt'] = '10'
+    _task(data, 'A1')['clndr_id'] = ''
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['tried'] == ['A1'] and raw['skipped'] == []
+    assert raw['slip_days'] == 600
+
+
+@needs_engine
+def test_a_mandatory_finish_on_a_weekend_holds_the_test_activity(monkeypatch):
+    # Codex: a Saturday Mandatory Finish holds the Friday close; a literal date
+    # compare missed it, A1 was skipped and A2 passed.
+    data = _drop_a2_pin(_p22())
+    _task(data, 'A1')['cstr_type'] = 'CS_MANDFIN'
+    _task(data, 'A1')['cstr_date'] = '2029-06-30 16:00'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'FAIL', pc['message']
+    assert raw['tried'] == ['A1']
+    assert 'its Mandatory Finish of 2029-06-30 16:00 holds it' in pc['message']
+
+
+@needs_engine
+def test_a_constraint_that_absorbs_part_of_the_delay_fails_with_the_move_measured(monkeypatch):
+    # Codex: A1's Mandatory Finish sat later than its logic; the gap absorbed
+    # 260 of the 600 days. A1 was skipped as not moving and A2 passed.
+    data = _drop_a2_pin(_p22())
+    _task(data, 'A1')['cstr_type'] = 'CS_MANDFIN'
+    _task(data, 'A1')['cstr_date'] = '2027-06-04 16:00'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'FAIL', pc['message']
+    assert raw['tried'] == ['A1']
+    assert raw['slip_days'] == 340
+    assert 'moved its finish by only 340 working days: its Mandatory Finish of 2027-06-04 16:00' in pc['message']
+
+
+def _seasonal(changed):
+    data = _drop_a2_pin(_p22())
+    a2 = _task(data, 'A2')
+    a2['clndr_id'] = '9999'
+    cal = data['tables']['CALENDAR']['records'][0]
+    exc = ''.join('(0||%d(d|%d)())' % (i, 46181 + i) for i in range(210))  # 8-Jun-26 to 3-Jan-27
+    data['tables']['CALENDAR']['records'].append(
+        dict(cal, clndr_id='9999',
+             clndr_data=cal['clndr_data'].replace('Exceptions()()', 'Exceptions()(' + exc + ')')))
+    data['tables']['SCHEDOPTIONS']['records'][0]['sched_calendar_on_relationship_lag'] = 'rcal_Successor'
+    rels = data['tables']['TASKPRED']['records']
+    rels[-1]['lag_hr_cnt'] = '-800'
+    if changed:
+        data['tables']['TASK']['records'].append(dict(a2, task_id='10005', task_code='X', task_name='X',
+                                                      clndr_id='7023', expect_end_date='2026-08-03 16:00'))
+        b = rels[0]
+        rels.extend([dict(b, task_pred_id='30001', pred_task_id='10002', task_id='10005'),
+                     dict(b, task_pred_id='30002', pred_task_id='10005', task_id='10004')])
+    return data
+
+
+@needs_engine
+def test_a_seasonal_path_passes_on_the_calendar_rule_and_names_the_lead(monkeypatch):
+    pc, raw = _raw(_seasonal(False), monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['slip_days'] == 450
+    assert 'the calendars and leads on the path' in pc['message']
+
+
+@needs_engine
+def test_an_expected_finish_on_the_new_driving_path_is_not_blamed_on_calendars(monkeypatch):
+    # Codex: F's driver changes to X, whose expected finish re-sizes 41 days;
+    # the calendar rule checked only the old path and passed it.
+    pc, raw = _raw(_seasonal(True), monkeypatch)
+    assert pc['counts']['status'] == 'FAIL', pc['message']
+    assert 'set the amount' not in pc['message']
+    assert 'first lost at F' in pc['message']
+    assert 'is now driven by X, whose expected finish re-sized its remaining work' in pc['message']
+
+
+@needs_engine
+def test_a_full_move_along_another_path_names_what_held_the_filed_path(monkeypatch):
+    # Claude AI: X ties A2 into F; A2 is pinned and the delay reaches F
+    # through X by the full 600. A PASS, which names A2 and its pin.
+    data = _p22()
+    a2 = _task(data, 'A2')
+    data['tables']['TASK']['records'].append(dict(a2, task_id='10005', task_code='X', task_name='X',
+                                                  cstr_type='', cstr_date=''))
+    rels = data['tables']['TASKPRED']['records']
+    base = dict(rels[0])
+    rels.append(dict(base, task_pred_id='20004', task_id='10005', pred_task_id='10002', lag_hr_cnt='0'))
+    rels.append(dict(base, task_pred_id='20005', task_id='10004', pred_task_id='10005', lag_hr_cnt='0'))
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS', pc['message']
+    assert raw['stayed'] == ['A2']
+    assert ('The delay reached the completion along another path: on the as-filed driving path, A2 (its '
+            'Mandatory Start of 2026-06-08 08:00 holds it) did not move.') in pc['message']
+
+
+@needs_engine
+def test_a_finish_that_does_not_take_the_delay_for_no_named_reason_is_not_scored(monkeypatch):
+    # Claude AI: an unexplained absorption is the finding the test exists for;
+    # it is not skipped for the next activity. Here the delayed run is made to
+    # leave A1's finish where it was.
+    import critical_path_test as cpt
+    data = _drop_a2_pin(_p22())
+    real = cpt._recalc
+    calls = []
+    kept = {}
+
+    def frozen(compute_cpm, acts, rels, kwargs, seconds, in_child):
+        res = real(compute_cpm, acts, rels, kwargs, seconds, in_child)
+        calls.append(1)
+        if len(calls) == 1:
+            kept['ef'] = res['nodes']['A1'].get('early_finish_dt')
+        else:
+            res['nodes']['A1']['early_finish_dt'] = kept['ef']
+        return res
+    monkeypatch.setattr(cpt, '_recalc', frozen)
+    pc = _twelve(data)
+    assert pc['counts']['status'] == 'NOT SCORED', pc['message']
+    assert 'did not move its finish by the delay' in pc['message']
+    assert 'the recalculation cannot say why' in pc['message']
+    assert len(calls) == 2
+
+
+@needs_engine
+def test_the_p6_longest_path_flag_off_the_tested_path_is_disclosed(monkeypatch):
+    # Claude AI: the file carries the P6 answer too; on two real files every
+    # activity on the tested path read N.
+    data = _drop_a2_pin(_p22())
+    _task(data, 'A1')['driving_path_flag'] = 'N'
+    pc, raw = _raw(data, monkeypatch)
+    assert pc['counts']['status'] == 'PASS'
+    assert raw['p6_off_path'] == 1
+    assert ("own longest-path flag in the file marks 1 of the 3 activities on this path, from A1 to the "
+            "completion, as off its longest path") in pc['message']

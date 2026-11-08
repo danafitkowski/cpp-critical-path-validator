@@ -136,13 +136,19 @@ LINK_NAMES = {'FS': 'Finish-to-Start', 'SS': 'Start-to-Start', 'FF': 'Finish-to-
               'SF': 'Start-to-Finish'}
 
 
-def _constraints_at(task, node):
+def _constraints_at(task, node, same_time=None):
     """The constraints filed on a task that its recalculated dates sit on: a
     start constraint whose date is the day of the recalculated early start, a
     finish constraint whose date is the day of the recalculated early finish,
     as P6 names them with their dates. A constraint whose date the activity is
     not on does not hold it, so it is not named (Claude AI review of the test,
-    8-Nov-26: a Start On or After it merely carried was named as holding it)."""
+    8-Nov-26: a Start On or After it merely carried was named as holding it).
+
+    ``same_time(a, b)``, where given, also counts a constraint dated on a
+    non-working day as sitting on the working time next to it: no working time
+    lies between them (Codex check of the review fixes, 8-Nov-26: a Mandatory
+    Finish on a Saturday holds the Friday close, and a literal date compare
+    missed it)."""
     es = _parse(node.get('early_start_dt') or node.get('es_date'))
     ef = _parse(node.get('early_finish_dt') or node.get('ef_date'))
     out = []
@@ -153,8 +159,22 @@ def _constraints_at(task, node):
         if not ctype or when is None:
             continue
         on = (es if ctype in _START_CONSTRAINTS else ef if ctype in _FINISH_CONSTRAINTS else None)
-        if on is not None and on.date() == when.date():
+        if on is None:
+            continue
+        if on.date() == when.date() or (same_time is not None and same_time(on, when)):
             out.append('%s of %s' % (CONSTRAINT_NAMES.get(ctype, ctype), when_s))
+    return out
+
+
+def _constraints_of(task):
+    """Every constraint filed on a task, as P6 names them with their dates."""
+    out = []
+    for kind, date in (('cstr_type', 'cstr_date'), ('cstr_type2', 'cstr_date2')):
+        ctype = (task.get(kind) or '').strip()
+        if ctype:
+            when = (task.get(date) or '').strip()
+            out.append('%s of %s' % (CONSTRAINT_NAMES.get(ctype, ctype), when) if when
+                       else CONSTRAINT_NAMES.get(ctype, ctype))
     return out
 
 
@@ -340,6 +360,16 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
     def _ef(node):
         return _parse((node or {}).get('early_finish_dt') or (node or {}).get('ef_date'))
 
+    def _same_time(cal):
+        def same(a, b):
+            lo, hi = (a, b) if a <= b else (b, a)
+            w = working_days_between(lo, hi, cal)
+            return w is not None and abs(w) < 0.5
+        return same
+
+    def _held(c, node):
+        return _constraints_at(by_code.get(c) or {}, node or {}, _same_time(_cal_of(c)[1]))
+
     # Activities nearer the data date that drive the path only through their
     # start were passed over; the result names them (Claude AI review of the
     # test, 8-Nov-26: the stretch they cover is not tested).
@@ -396,25 +426,52 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
         if own is not None and own >= DELAY_WORKING_DAYS - SLIP_TOLERANCE_DAYS:
             after, test_code, test_cal = run_after, cand, cal
             break
-        held = _constraints_at(task, t_node)
+        # A constraint holds it where its recalculated date sits on the
+        # constraint (as filed or delayed, a weekend date counting as the
+        # working time beside it), or where the engine names a constraint as
+        # its driver: a Mandatory Finish later than the logic made a gap that
+        # absorbed part of the delay (Codex check of the review fixes, 8-Nov-
+        # 26: A1 took 340 of 600, was skipped, and A2 passed).
+        same = _same_time(cal)
+        held = (_constraints_at(task, t_node, same) or _constraints_at(task, nodes[cand], same)
+                or (_constraints_of(task) if ((t_node.get('driving_predecessor') or {}).get('type') == 'CONSTRAINT'
+                                              or (nodes[cand].get('driving_predecessor') or {}).get('type')
+                                              == 'CONSTRAINT') else []))
         if held:
+            c_after = _ef((run_after.get('nodes') or {}).get(comp_code))
+            c_slip = working_days_between(date_before, c_after, cal) if c_after else None
+            took = ('did not move its finish' if own is None or own <= 0 else
+                    'moved its finish by only %s working days' % '{:g}'.format(round(own, 2)))
             return {'ran': True, 'status': 'FAIL', 'test_activity': cand, 'completion_activity': comp_code,
-                    'delay_days': DELAY_WORKING_DAYS, 'slip_days': 0.0, 'tried': tried,
+                    'delay_days': DELAY_WORKING_DAYS,
+                    'slip_days': round(c_slip, 2) if c_slip is not None else None, 'tried': tried,
                     'driving_path': path,
                     'message': ("Critical Path Test FAILS: recalculated on the CPP CPM engine, a delay of %d "
                                 "working days inserted on %s (the unfinished activity on the completion's "
-                                "driving path nearest the data date whose finish drives that path%s) did not "
-                                "move its finish: its %s holds it, so a constraint, not logic, holds the "
-                                "critical path there and the delay cannot reach the completion activity %s."
-                                % (DELAY_WORKING_DAYS, cand, _lead_notes(passed_over, skipped),
-                                   ' and '.join(held), comp_code))}
+                                "driving path nearest the data date whose finish drives that path%s) %s: its "
+                                "%s holds it, so a constraint, not logic, holds the critical path there and "
+                                "the delay does not reach the completion activity %s%s."
+                                % (DELAY_WORKING_DAYS, cand, _lead_notes(passed_over, skipped), took,
+                                   ' and '.join(held), comp_code,
+                                   '' if c_slip is None else
+                                   ', which moved by %s working days' % '{:g}'.format(round(c_slip, 2))))}
         if t_node.get('expected_finish_applied'):
             why = 'its expected finish sets its finish'
-        elif (act_by_code.get(cand) or {}).get('resource_assignments') or \
-                (act_by_code.get(cand) or {}).get('rsrc_assignments'):
+        elif (act_by_code.get(cand) or {}).get('resource_assignments'):
             why = 'its resources set its finish'
         else:
-            why = 'its finish did not move'
+            # A finish that does not take the delay for no reason the test can
+            # name is the finding the test exists for: it is not skipped
+            # (Claude AI check of the review fixes, 8-Nov-26).
+            moved = '' if own is None else ', moving by %s working days' % '{:g}'.format(round(own, 2))
+            return {'ran': True, 'status': 'NS', 'test_activity': cand, 'delay_days': DELAY_WORKING_DAYS,
+                    'slip_days': None, 'driving_path': path, 'tried': tried,
+                    'message': ("Critical Path Test NOT SCORED: a delay of %d working days inserted on %s (the "
+                                "unfinished activity on the completion's driving path nearest the data date "
+                                "whose finish drives that path%s) did not move its finish by the delay%s, and "
+                                "no constraint, expected finish or resource sets it; the recalculation cannot "
+                                "say why, so the test is not scored."
+                                % (DELAY_WORKING_DAYS, cand, _lead_notes(passed_over, skipped), moved))}
         skipped.append((cand, why))
     if after is None:
         return {'ran': True, 'status': 'NS', 'test_activity': None, 'delay_days': DELAY_WORKING_DAYS,
@@ -435,12 +492,13 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
     downstream = path[path.index(test_code) + 1:]
     # Does the engine still name the test activity at the head of the
     # completion's driving chain in the delayed run?
-    named_back, seen2, c2 = False, set(), comp_code
+    named_back, seen2, c2, new_chain = False, set(), comp_code, []
     while c2 and c2 in after_nodes and c2 not in seen2:
         if c2 == test_code:
             named_back = True
             break
         seen2.add(c2)
+        new_chain.append(c2)
         c2 = (after_nodes[c2].get('driving_predecessor') or {}).get('code')
     # A move short of the delay passes only when the logic demonstrably carried
     # it and the calendars can account for the rest (Claude AI review of the
@@ -454,12 +512,42 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
     # crosses another calendar or carries a lag, without which the calendars
     # cannot make the move shorter.
     test_cid = _cal_of(test_code)[0]
-    moved_all = all(_ef(nodes.get(c)) and _ef(after_nodes.get(c)) and _ef(after_nodes.get(c)) > _ef(nodes.get(c))
-                    for c in downstream)
-    no_expected = not any((after_nodes.get(c) or {}).get('expected_finish_applied') for c in downstream)
-    calendars_differ = any(_cal_of(c)[0] != test_cid for c in downstream)
-    lagged = any(((nodes.get(c) or {}).get('driving_predecessor') or {}).get('lag_days') for c in downstream)
-    carried = named_back and moved_all and no_expected and (calendars_differ or lagged)
+
+    def _moved(c):
+        b, a = _ef(nodes.get(c)), _ef(after_nodes.get(c))
+        return bool(b and a and a > b)
+
+    stayed = [c for c in downstream if not _moved(c)]
+    moved_all = not stayed
+    # The as-filed path and the delayed driving chain both: where the chain
+    # changed, an expected finish or a constraint on the new one absorbs the
+    # delay just as well (Codex check of the review fixes, 8-Nov-26: a new
+    # driver's expected finish re-sized 41 days and the shortfall was blamed
+    # on calendars).
+    both = list(dict.fromkeys(downstream + (new_chain if named_back else [])))
+    no_expected = not any((after_nodes.get(c) or {}).get('expected_finish_applied') for c in both)
+    no_hold = not any(_held(c, after_nodes.get(c)) for c in both)
+    calendars_differ = any(_cal_of(c)[0] != test_cid for c in both)
+    lags = ([float(((nodes.get(c) or {}).get('driving_predecessor') or {}).get('lag_days') or 0) for c in downstream]
+            + [float(((after_nodes.get(c) or {}).get('driving_predecessor') or {}).get('lag_days') or 0)
+               for c in (new_chain if named_back else [])])
+    lagged = any(lags)
+    carried = named_back and moved_all and no_expected and no_hold and (calendars_differ or lagged)
+    lag_word = ('lags and leads' if any(x > 0 for x in lags) and any(x < 0 for x in lags)
+                else 'leads' if any(x < 0 for x in lags) else 'lags')
+    # P6's own longest-path flag (TASK.driving_path_flag): where the file uses
+    # it and marks activities on the tested path as off P6's longest path, P6
+    # drives the completion through another path; say so (Claude AI check of
+    # the review fixes, 8-Nov-26: on two real files every activity on the
+    # tested path read N).
+    segment = [test_code] + downstream
+    p6_note, p6_off = '', 0
+    if any((t.get('driving_path_flag') or '').strip() == 'Y' for t in work_tasks):
+        p6_off = sum(1 for c in segment if ((by_code.get(c) or {}).get('driving_path_flag') or '').strip() == 'N')
+        if p6_off:
+            p6_note = (" P6's own longest-path flag in the file marks %d of the %d activities on this path, from "
+                       "%s to the completion, as off its longest path: P6 drives the completion through another "
+                       "path, and this result is the CPP engine's." % (p6_off, len(segment), test_code))
     full = slip >= DELAY_WORKING_DAYS - SLIP_TOLERANCE_DAYS
     ok = full or (carried and slip > 0)
     lead = ("recalculated on the CPP CPM engine, a delay of %d working days inserted on %s (the unfinished "
@@ -474,11 +562,26 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
         # test, 8-Nov-26).
         filed_note = (" As filed, the recalculation puts the completion activity at %s; the file shows %s."
                       % (date_before.strftime('%Y-%m-%d %H:%M'), filed.strftime('%Y-%m-%d %H:%M')))
-    if full:
+    notes = filed_note + p6_note
+    if full and stayed:
+        # The completion moved by the delay, but along another path: an
+        # activity on the as-filed driving path did not move (Claude AI check
+        # of the review fixes, 8-Nov-26). The pamphlet's test passes; the
+        # result does not hide what held the as-filed path.
+        parts = []
+        for c in stayed:
+            cs = _held(c, after_nodes.get(c))
+            parts.append(c + (' (its %s holds it)' % ' and '.join(cs) if cs else ''))
+        msg = ('Critical Path Test PASSES: %s moved the completion activity %s by %s working days, from %s '
+               'to %s. The delay reached the completion along another path: on the as-filed driving path, %s '
+               'did not move.%s'
+               % (lead, comp_code, '{:g}'.format(slip), date_before.strftime('%Y-%m-%d %H:%M'),
+                  date_after.strftime('%Y-%m-%d %H:%M'), ', '.join(parts), notes))
+    elif full:
         msg = ('Critical Path Test PASSES: %s moved the completion activity %s by %s working days, from %s '
                'to %s. The critical path carries a delay through to completion.%s'
                % (lead, comp_code, '{:g}'.format(slip),
-                  date_before.strftime('%Y-%m-%d %H:%M'), date_after.strftime('%Y-%m-%d %H:%M'), filed_note))
+                  date_before.strftime('%Y-%m-%d %H:%M'), date_after.strftime('%Y-%m-%d %H:%M'), notes))
     elif ok:
         msg = ('Critical Path Test PASSES: %s moved the completion activity %s by %s working days (from %s '
                'to %s). Every activity after %s on the driving path moved later, none is held by a '
@@ -487,14 +590,17 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
                'number of days in the later period, set the amount.%s'
                % (lead, comp_code, '{:g}'.format(slip), date_before.strftime('%Y-%m-%d %H:%M'),
                   date_after.strftime('%Y-%m-%d %H:%M'), test_code, test_code,
-                  'calendars and lags' if (calendars_differ and lagged) else
-                  ('calendars' if calendars_differ else 'lags'), filed_note))
+                  ('calendars and ' + lag_word) if (calendars_differ and lagged) else
+                  ('calendars' if calendars_differ else lag_word), notes))
     else:
         # Where the delay is lost: the first activity after the test activity
         # on the as-filed driving path that moved by less than the delay and
-        # did not move, or whose recalculated date sits on its constraint, or
-        # whose finish an expected finish set; failing those, the first that
-        # moved by less than the delay. Then what holds it.
+        # did not move, sits on its constraint's date, had its finish set by an
+        # expected finish, or is now driven by something other than the
+        # path's previous activity (a calendar-shortened activity upstream of
+        # a driver switch is not the loss: Claude AI check of the review
+        # fixes, 8-Nov-26); failing those, the first that moved by less than
+        # the delay. Then what holds it.
         lost_at, lost_slip, held_by, first_short = None, None, '', None
         prev = test_code
         for c in downstream:
@@ -502,8 +608,10 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
             a0 = _ef(a_node)
             sl = working_days_between(b0, a0, test_cal) if (b0 and a0) else None
             if sl is not None and sl < DELAY_WORKING_DAYS - SLIP_TOLERANCE_DAYS:
+                ndp = a_node.get('driving_predecessor') or {}
+                switched = (ndp.get('code') and ndp.get('code') != prev) or ndp.get('type') == 'CONSTRAINT'
                 stuck = (a0 <= b0 or a_node.get('expected_finish_applied')
-                         or _constraints_at(by_code.get(c) or {}, a_node))
+                         or _held(c, a_node) or switched)
                 if first_short is None:
                     first_short = (c, round(sl, 2), prev)
                 if stuck:
@@ -515,13 +623,23 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
         if lost_at:
             a_node = after_nodes.get(lost_at) or {}
             dp = a_node.get('driving_predecessor') or {}
-            cstrs = _constraints_at(by_code.get(lost_at) or {}, a_node)
+            cstrs = _held(lost_at, a_node)
             if cstrs:
                 held_by = ': its %s holds it' % ' and '.join(cstrs)
             elif a_node.get('expected_finish_applied'):
-                held_by = ': its expected finish sets its finish'
+                s0 = _parse((nodes.get(lost_at) or {}).get('early_start_dt') or (nodes.get(lost_at) or {}).get('es_date'))
+                s1 = _parse(a_node.get('early_start_dt') or a_node.get('es_date'))
+                s_mv = working_days_between(s0, s1, test_cal) if (s0 and s1) else None
+                held_by = (': its expected finish sets its finish' if s_mv is None else
+                           ': its start moved by %s working days, but its expected finish re-sized its remaining '
+                           'work' % '{:g}'.format(round(s_mv, 2)))
             elif dp.get('code') and dp.get('code') != prev:
-                held_by = ' and is now driven by %s' % dp['code']
+                drv = dp['code']
+                dcs = _held(drv, after_nodes.get(drv))
+                xf = (after_nodes.get(drv) or {}).get('expected_finish_applied')
+                held_by = (' and is now driven by %s%s'
+                           % (drv, ', whose %s holds it' % ' and '.join(dcs) if dcs else
+                              (', whose expected finish re-sized its remaining work' if xf else '')))
             elif dp.get('code'):
                 held_by = (' and is still driven by %s through a %s link'
                            % (dp['code'], LINK_NAMES.get(dp.get('type'), dp.get('type') or 'logic')))
@@ -535,12 +653,13 @@ def run(data, proj_id, work_tasks, preds, task_map, cal_map, completion_task,
         msg = ('Critical Path Test FAILS: %s moved the completion activity %s by only %s working days%s%s. '
                'Something on that path (a constraint, an expected finish, a broken or lagged link) does not '
                'carry the delay through to completion.%s'
-               % (lead, comp_code, '{:g}'.format(slip), where, tail, filed_note))
+               % (lead, comp_code, '{:g}'.format(slip), where, tail, notes))
     return {'ran': True, 'status': 'PASS' if ok else 'FAIL', 'test_activity': test_code,
             'completion_activity': comp_code, 'delay_days': DELAY_WORKING_DAYS, 'slip_days': slip,
             'finish_before': date_before.strftime('%Y-%m-%d %H:%M'),
             'finish_after': date_after.strftime('%Y-%m-%d %H:%M'),
             'finish_filed': filed.strftime('%Y-%m-%d %H:%M') if filed else None,
+            'p6_off_path': p6_off, 'stayed': stayed,
             'named_back': named_back, 'carried_to_completion': bool(full or carried),
             'tried': tried, 'skipped': skipped, 'passed_over': passed_over,
             'driving_path': path, 'message': msg}

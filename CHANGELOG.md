@@ -74,11 +74,16 @@ exact counts, never on a rounded percentage. Per check:
   working days added to the unfinished activity on the completion's driving path nearest
   the data date whose finish drives that path, and #12 passes only when the completion
   moves by the delay; a failure names the activity where the delay is lost and what holds
-  it. A test activity whose finish a constraint holds fails there. A smaller move passes
-  only when every activity after the test activity on the as-filed path moved later, none
-  had its finish set by an expected finish, the completion is still driven back through
-  it, and the path crosses another calendar or carries a lag (the result then says the
-  calendars or lags set the amount). The test is not run on a network of more than 5,000
+  it. A test activity a constraint holds fails there (its date sits on the constraint's,
+  a weekend date counting as the working time beside it, or a constraint drives it), with
+  the completion's move measured; one that does not take the delay for no reason the test
+  can name is not scored. A smaller move passes only when every activity after the test
+  activity on the as-filed path moved later, none on that path or on the delayed driving
+  chain had its finish set by an expected finish or sits on a constraint, the completion
+  is still driven back through it, and the path crosses another calendar or carries a lag
+  (the result then says the calendars or lags set the amount). A full move along another
+  path names what held the as-filed one, and P6's own longest-path flag off the tested
+  path is disclosed. The test is not run on a network of more than 5,000
   activities, or past 20 seconds for the run as filed and 60 for the whole test (above
   100 activities each recalculation runs in a separate process that is stopped at the
   limit), nor where #12 is already decided (a pinned completion, or one with no
