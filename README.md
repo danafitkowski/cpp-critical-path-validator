@@ -3,7 +3,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![tests](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/danafitkowski/cpp-critical-path-validator/actions/workflows/test.yml)
-[![version: 0.7.0](https://img.shields.io/badge/version-0.7.0-blue.svg)](CHANGELOG.md)
+[![version: 0.8.0](https://img.shields.io/badge/version-0.8.0-blue.svg)](CHANGELOG.md)
 [![AACE: 49R--06](https://img.shields.io/badge/AACE-49R--06-orange.svg)](#aace-alignment)
 
 Critical path validation, logic health assessment, and optimization recommendations for Primavera P6 schedules — plus a full DCMA 14-Point Assessment.
@@ -16,11 +16,11 @@ Companion to [`cpp-cpm-engine`](https://github.com/danafitkowski/cpp-cpm-engine)
 
 ## Scope and status
 
-This is v0.7.0, and it is a public subset. Critical Path Partners maintains a larger internal validator; what this repository publishes is the nine-check core, the DCMA 14-Point assessment, the driving-path tracer and the HTML dashboard. It does not carry every check or output the internal version has.
+This is v0.8.0, and it is a public subset. Critical Path Partners maintains a larger internal validator; what this repository publishes is the nine-check core, the DCMA 14-Point assessment, the driving-path tracer and the HTML dashboard. It does not carry every check or output the internal version has.
 
 Nothing here is a stub. The code in `scripts/` is the code that runs, the tests in `tests/` are the tests that guard it, and CI runs them on three operating systems across Python 3.10 to 3.12. What this repository is not is a mirror of the internal tool, so a report produced by Critical Path Partners should not be assumed to have come from this file set.
 
-`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.5.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.5.0) (commit [`86211fc`](https://github.com/danafitkowski/cpp-xer-parser/commit/86211fcb0199ed3de207284055f472480376d022)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too (except that `config_profiles.py` sets DCMA-14 #10 Resources to 100% on every profile, as CPP's written DCMA-14 definition does; cpp-xer-parser's main branch carries the identical file since [`f8ea747`](https://github.com/danafitkowski/cpp-xer-parser/commit/f8ea747), not yet in a release), so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
+`scripts/xer_parser.py` is vendored byte for byte from [`cpp-xer-parser`](https://github.com/danafitkowski/cpp-xer-parser) at release [`v0.6.0`](https://github.com/danafitkowski/cpp-xer-parser/releases/tag/v0.6.0) (commit [`1af10d6`](https://github.com/danafitkowski/cpp-xer-parser/commit/1af10d623eb273c6bd3fdd1b721b52c342e997ec)), and `scripts/validation.py` and `scripts/config_profiles.py` are that release's files too, so the validator stands alone with no install step. CI verifies the vendored `xer_parser.py` against that pinned commit on every push, and separately reports, without failing the build, when upstream has moved past it.
 
 `scripts/driving_path.py` is Critical Path Partners' internal longest-path trace, bundled as it is apart from one import line (its header says which), so Check 2 reads the longest path the way the internal validator does. It needs `cpp-cpm-engine` on the path; see [Integration with the CPP forensic suite](#integration-with-the-cpp-forensic-suite).
 

@@ -14,7 +14,7 @@ jobs:
       # The upstream commit scripts/xer_parser.py is vendored from, and the
       # SHA-256 of that file. Re-vendoring is a two-line change: bump both
       # together, and the checks below do the rest.
-      XER_PIN: 86211fcb0199ed3de207284055f472480376d022
+      XER_PIN: 1af10d623eb273c6bd3fdd1b721b52c342e997ec
       XER_SHA256: 3ec691a62ddcca3cddae016bc0beb80d2508f978b079ec248475de8943ff07ce
       # The cpp-cpm-engine commit the tests run against. Check 3's working-day
       # test and Check 2's driving-path trace (scripts/driving_path.py) call

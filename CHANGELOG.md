@@ -4,7 +4,7 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
 
 ---
 
-## Unreleased
+## v0.8.0 — 2026-11-08
 
 DCMA-14 is now measured to one written definition: CPP's DCMA-14 definition, version 1
 (<https://criticalpathpartners.ca/dcma-14-definition.html>), the same text every CPP
@@ -15,6 +15,11 @@ against every one of them.
 
 **Results a caller may see move.** No function signature changed and no key was removed.
 Most schedules move on several checks, from the old reading to the definition's.
+
+**Why a minor release.** Before 1.0 this project moves the minor number for a release
+that changes results a caller already reads. The bundled parser is `cpp-xer-parser`
+v0.6.0: its `xer_parser.py` is byte for byte the v0.5.0 file, and its `config_profiles.py`
+is the profile file this release already carried.
 
 ### Changed
 
