@@ -63,5 +63,6 @@ Synthetic schedules (no client data) with the results `references/DCMA_DEFINITIO
 | p26_tied_deadline | #13, D11: as p10, but the deadline (Finish On or Before) sits on the milestone that feeds the completion on the same instant; #13 reads it from the tie: CPLI 0.5 (FAIL) |
 | p27_finished_successor | D11, #12: a pinned finish milestone whose only successor finished out of sequence ties with an unlinked task; a link to finished work does not end its claim, so it is the completion and #12 FAILS on its pin |
 | p28_parallel_deadline | #13: a parallel interim milestone with a deadline ties with the completion but no relationship joins them; it is not the project's deadline, and with zero float #13 is NOT SCORED |
+| p29_dateless_deadline | #13: as p26, but the Finish On or Before on the feeding milestone carries no date; a constraint with no date names no deadline, and with zero float #13 is NOT SCORED |
 
 Working-day counts assume the fixtures' calendars, which carry no holidays except the one p11_short_day tests.

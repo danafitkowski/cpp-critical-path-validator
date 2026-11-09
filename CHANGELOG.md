@@ -24,6 +24,10 @@ All notable changes to `cpp-critical-path-validator` are documented here. Versio
   parallel milestone that only finishes at the same instant is not,
   so which tied activity D11 takes no longer decides whether the deadline is read. New shared
   fixtures `p26_tied_deadline`, `p27_finished_successor` and `p28_parallel_deadline`.
+- **DCMA-14 #13: a deadline constraint with no date names no deadline.** A Finish On or
+  Finish On or Before that carries no date, or a Must Finish By that cannot be read, no longer
+  passes by the not-scored guard: with no readable deadline date and a zero float, #13 is NOT
+  SCORED (it read PASS 1.000 from the float). New shared fixture `p29_dateless_deadline`.
 
 ## v0.8.0 — 2026-11-08
 

@@ -84,7 +84,7 @@ def test_13_reads_the_deadline_on_an_activity_tied_with_the_completion():
     assert 'on E1' in pc['message'] and 'of F' in pc['message'], pc['message']
 
 
-# The review of the tie (Claude AI, 8-Nov-26).
+# The review of the tie (8-Nov-26).
 def test_a_finished_out_of_sequence_successor_does_not_end_the_claim():
     from dcma14 import _with_successor
     f = _t('1', 'F', '2029-06-13 16:00')
