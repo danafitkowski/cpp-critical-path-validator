@@ -1,4 +1,4 @@
-"""DCMA review, round 2 (7 November 2026): what the second Codex review found
+"""DCMA review, round 2 (7 November 2026): what the second review found
 in the validator after the first round of fixes, pinned.
 
 1. D0 chooses the project on the data dates AS FILED. The parser fills a
@@ -81,7 +81,7 @@ def test_readable_hours(cell, hours):
     assert _readable_hours(cell) == hours
 
 
-# ── Claude AI review, round 2 ─────────────────────────────────────────────
+# ── Round 2, the other review's findings ───────────────────────────────────
 
 def test_a_duplicated_id_with_a_blank_duration_is_disclosed_once():
     """#8: an activity whose Activity ID is ambiguous AND whose duration is
